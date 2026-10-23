@@ -1,0 +1,316 @@
+{
+  "dataset_name": "India Air Quality Index (AQI) Dataset 2023-2025",
+  "total_records": 235785,
+  "model_accuracy": 100.0,
+  "classes": [
+    "Good",
+    "Moderate",
+    "Poor",
+    "Satisfactory",
+    "Severe",
+    "Very Poor"
+  ],
+  "feature_importances": {
+    "aqi_value": 0.9967,
+    "number_of_monitoring_stations": 0.0033,
+    "note": 0.0
+  },
+  "status_distribution": [
+    {
+      "category": "Satisfactory",
+      "count": 88897,
+      "percentage": 37.7
+    },
+    {
+      "category": "Moderate",
+      "count": 77537,
+      "percentage": 32.9
+    },
+    {
+      "category": "Good",
+      "count": 41971,
+      "percentage": 17.8
+    },
+    {
+      "category": "Poor",
+      "count": 21154,
+      "percentage": 9.0
+    },
+    {
+      "category": "Very Poor",
+      "count": 5671,
+      "percentage": 2.4
+    },
+    {
+      "category": "Severe",
+      "count": 555,
+      "percentage": 0.2
+    }
+  ],
+  "pollutant_distribution": [
+    {
+      "pollutant": "PM10",
+      "count": 111053,
+      "percentage": 49.6
+    },
+    {
+      "pollutant": "PM2.5",
+      "count": 59670,
+      "percentage": 26.7
+    },
+    {
+      "pollutant": "O3",
+      "count": 16202,
+      "percentage": 7.2
+    },
+    {
+      "pollutant": "PM2.5,PM10",
+      "count": 13199,
+      "percentage": 5.9
+    },
+    {
+      "pollutant": "CO",
+      "count": 12867,
+      "percentage": 5.8
+    },
+    {
+      "pollutant": "PM10,O3",
+      "count": 3914,
+      "percentage": 1.7
+    },
+    {
+      "pollutant": "SO2",
+      "count": 3815,
+      "percentage": 1.7
+    },
+    {
+      "pollutant": "NO2",
+      "count": 3012,
+      "percentage": 1.3
+    }
+  ],
+  "city_benchmarks": {
+    "Meerut": {
+      "city": "Meerut",
+      "records": 1121,
+      "avg_aqi": 158.4,
+      "min_aqi": 21,
+      "max_aqi": 424,
+      "dominant_pollutant": "PM10",
+      "status_breakdown": {
+        "Moderate": 446,
+        "Poor": 263,
+        "Satisfactory": 238,
+        "Good": 99,
+        "Very Poor": 74,
+        "Severe": 1
+      }
+    },
+    "Delhi": {
+      "city": "Delhi",
+      "records": 1125,
+      "avg_aqi": 206.4,
+      "min_aqi": 44,
+      "max_aqi": 494,
+      "dominant_pollutant": "PM2.5,PM10",
+      "status_breakdown": {
+        "Moderate": 403,
+        "Poor": 288,
+        "Very Poor": 202,
+        "Satisfactory": 190,
+        "Severe": 38,
+        "Good": 4
+      }
+    },
+    "Noida": {
+      "city": "Noida",
+      "records": 2247,
+      "avg_aqi": 192.8,
+      "min_aqi": 23,
+      "max_aqi": 494,
+      "dominant_pollutant": "PM10",
+      "status_breakdown": {
+        "Moderate": 869,
+        "Poor": 642,
+        "Satisfactory": 370,
+        "Very Poor": 295,
+        "Good": 40,
+        "Severe": 31
+      }
+    },
+    "Ghaziabad": {
+      "city": "Ghaziabad",
+      "records": 1124,
+      "avg_aqi": 183.0,
+      "min_aqi": 14,
+      "max_aqi": 438,
+      "dominant_pollutant": "PM10",
+      "status_breakdown": {
+        "Moderate": 455,
+        "Poor": 307,
+        "Satisfactory": 189,
+        "Very Poor": 127,
+        "Good": 38,
+        "Severe": 8
+      }
+    },
+    "Gurugram": {
+      "city": "Gurugram",
+      "records": 1120,
+      "avg_aqi": 190.8,
+      "min_aqi": 29,
+      "max_aqi": 469,
+      "dominant_pollutant": "PM2.5",
+      "status_breakdown": {
+        "Moderate": 458,
+        "Poor": 383,
+        "Satisfactory": 154,
+        "Very Poor": 108,
+        "Good": 10,
+        "Severe": 7
+      }
+    },
+    "Lucknow": {
+      "city": "Lucknow",
+      "records": 1125,
+      "avg_aqi": 131.1,
+      "min_aqi": 35,
+      "max_aqi": 311,
+      "dominant_pollutant": "PM2.5",
+      "status_breakdown": {
+        "Moderate": 528,
+        "Satisfactory": 330,
+        "Poor": 172,
+        "Good": 91,
+        "Very Poor": 4
+      }
+    },
+    "Agra": {
+      "city": "Agra",
+      "records": 2246,
+      "avg_aqi": 88.8,
+      "min_aqi": 20,
+      "max_aqi": 286,
+      "dominant_pollutant": "PM10",
+      "status_breakdown": {
+        "Satisfactory": 1067,
+        "Moderate": 720,
+        "Good": 419,
+        "Poor": 40
+      }
+    },
+    "Jaipur": {
+      "city": "Jaipur",
+      "records": 1125,
+      "avg_aqi": 131.4,
+      "min_aqi": 30,
+      "max_aqi": 364,
+      "dominant_pollutant": "PM10",
+      "status_breakdown": {
+        "Moderate": 638,
+        "Satisfactory": 300,
+        "Poor": 123,
+        "Good": 57,
+        "Very Poor": 7
+      }
+    }
+  },
+  "monthly_trends": [
+    {
+      "month": "2023-05",
+      "avg_aqi": 102.8
+    },
+    {
+      "month": "2023-06",
+      "avg_aqi": 88.4
+    },
+    {
+      "month": "2023-07",
+      "avg_aqi": 64.7
+    },
+    {
+      "month": "2023-08",
+      "avg_aqi": 77.0
+    },
+    {
+      "month": "2023-09",
+      "avg_aqi": 70.8
+    },
+    {
+      "month": "2023-10",
+      "avg_aqi": 114.2
+    },
+    {
+      "month": "2023-11",
+      "avg_aqi": 167.3
+    },
+    {
+      "month": "2023-12",
+      "avg_aqi": 152.8
+    },
+    {
+      "month": "2024-01",
+      "avg_aqi": 157.6
+    },
+    {
+      "month": "2024-02",
+      "avg_aqi": 120.9
+    },
+    {
+      "month": "2024-03",
+      "avg_aqi": 108.9
+    },
+    {
+      "month": "2024-04",
+      "avg_aqi": 111.2
+    },
+    {
+      "month": "2024-05",
+      "avg_aqi": 108.4
+    },
+    {
+      "month": "2024-06",
+      "avg_aqi": 89.8
+    },
+    {
+      "month": "2024-07",
+      "avg_aqi": 62.2
+    },
+    {
+      "month": "2024-08",
+      "avg_aqi": 55.2
+    },
+    {
+      "month": "2024-09",
+      "avg_aqi": 63.1
+    },
+    {
+      "month": "2024-10",
+      "avg_aqi": 98.7
+    },
+    {
+      "month": "2024-11",
+      "avg_aqi": 153.1
+    },
+    {
+      "month": "2024-12",
+      "avg_aqi": 131.5
+    },
+    {
+      "month": "2025-01",
+      "avg_aqi": 131.4
+    },
+    {
+      "month": "2025-02",
+      "avg_aqi": 112.9
+    },
+    {
+      "month": "2025-03",
+      "avg_aqi": 105.5
+    },
+    {
+      "month": "2025-04",
+      "avg_aqi": 99.4
+    }
+  ]
+}

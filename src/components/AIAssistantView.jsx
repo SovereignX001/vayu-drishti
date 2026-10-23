@@ -1,7 +1,16 @@
 import React, { useState } from 'react';
 import { Sparkles, Send, Bot, User, ArrowRight } from 'lucide-react';
+import { askDrishti } from '../lib/api';
+import { CITIES_DATA } from '../data/airData';
 
-export default function AIAssistantView({ onTriggerAlert }) {
+export default function AIAssistantView({ 
+  onTriggerAlert, 
+  currentLocation, 
+  selectedCity, 
+  selectedLocation,
+  lat: propLat,
+  lon: propLon,
+}) {
   const [messages, setMessages] = useState([
     {
       sender: 'ai',
@@ -12,6 +21,23 @@ export default function AIAssistantView({ onTriggerAlert }) {
   const [inputVal, setInputVal] = useState('');
   const [isTyping, setIsTyping] = useState(false);
 
+  // Derive lat and lon from current selected location/city in app state, or fallback to Meerut
+  const lat =
+    propLat ??
+    currentLocation?.lat ??
+    selectedLocation?.lat ??
+    (selectedCity && CITIES_DATA[selectedCity]?.center?.[0]) ??
+    28.9845;
+
+  const lon =
+    propLon ??
+    currentLocation?.lon ??
+    currentLocation?.lng ??
+    selectedLocation?.lon ??
+    selectedLocation?.lng ??
+    (selectedCity && CITIES_DATA[selectedCity]?.center?.[1]) ??
+    77.7064;
+
   const samplePrompts = [
     "Is today a good day for a picnic at Meerut Cantt or Pine Woodlands?",
     "Should I wear an N95 mask for my road commute to Begum Bridge?",
@@ -20,9 +46,9 @@ export default function AIAssistantView({ onTriggerAlert }) {
     "Can I go for an evening walk around Nauchandi Grounds tonight?"
   ];
 
-  const handleSend = (textToSend) => {
-    const query = textToSend || inputVal;
-    if (!query.trim()) return;
+  const handleSend = async (textToSend) => {
+    const query = (typeof textToSend === 'string' ? textToSend : inputVal).trim();
+    if (!query || isTyping) return;
 
     const userMsg = {
       sender: 'user',
@@ -34,34 +60,29 @@ export default function AIAssistantView({ onTriggerAlert }) {
     setInputVal('');
     setIsTyping(true);
 
-    setTimeout(() => {
-      let reply = "";
-      const lower = query.toLowerCase();
-
-      if (lower.includes('picnic') || lower.includes('cantt') || lower.includes('park') || lower.includes('pine')) {
-        reply = "✓ Great Day for a Picnic! Meerut Cantt & Mall Road (AQI 58) is currently protected by a dense military pine and neem botanical canopy. It is an exceptional day for a family picnic, morning walk, or outdoor sports. The urban forest actively sinks particulates, giving it the cleanest air in Meerut district.";
-      } else if (lower.includes('mask') || lower.includes('commute') || lower.includes('begum bridge') || lower.includes('abu lane')) {
-        reply = "⚠ Travel Tip: If you are commuting through Begum Bridge or Abu Lane during peak hours (08:30 AM - 10:30 AM or 06:00 PM - 08:00 PM), traveling with an N95 mask is strongly advised. Narrow market radials trap vehicle exhaust with PM2.5 reaching 120-140 µg/m³.";
-      } else if (lower.includes('partapur') || lower.includes('delay') || lower.includes('expressway') || lower.includes('travel')) {
-        reply = "⚠ Delay Your Travel if Possible: Partapur Industrial Area & Delhi-Meerut Expressway Link is currently at AQI 345 (Severe). Early boundary layer inversion traps industrial boiler soot and heavy freight exhaust under a 160m lid. We recommend delaying non-essential travel until after 11:30 AM when solar thermal lift improves dispersion.";
-      } else if (lower.includes('shastri nagar') || lower.includes('window') || lower.includes('ventilate')) {
-        reply = "Shastri Nagar Sector 3 is at AQI 125 (Moderate). The optimal window to open your apartment windows for fresh air exchange is between 01:00 PM and 04:00 PM. Keep windows sealed between 08:00 AM - 10:00 AM during morning vehicular commute.";
-      } else if (lower.includes('jog') || lower.includes('walk') || lower.includes('nauchandi') || lower.includes('run')) {
-        reply = "For Nauchandi Grounds (AQI 170), early morning before 07:30 AM or late afternoon around 03:30 PM is acceptable for light exercise. Avoid vigorous endurance running between 08:00 AM - 10:00 AM when cold surface air traps vehicular smoke.";
-      } else {
-        reply = `Drishti AI advice: Today in Meerut, the Cantt Forest Reserve (AQI 58) is ideal for picnics and unmasked outdoor plans, while the southern industrial corridor at Partapur (AQI 345) requires wearing an N95 mask or delaying non-essential road travel.`;
-      }
-
+    try {
+      const reply = await askDrishti(query, lat, lon);
       setMessages((prev) => [
         ...prev,
         {
           sender: 'ai',
-          text: reply,
+          text: reply || "I couldn't retrieve specific advice right now. Please try again.",
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ]);
+    } catch (err) {
+      console.error('Failed to get answer from Drishti AI:', err);
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: 'ai',
+          text: "I'm having trouble connecting to the air intelligence service right now. Please verify that the backend is running and try again.",
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      ]);
+    } finally {
       setIsTyping(false);
-    }, 700);
+    }
   };
 
   return (
@@ -77,7 +98,7 @@ export default function AIAssistantView({ onTriggerAlert }) {
             <h3 className="text-xl font-black text-slate-900 font-sans flex items-center gap-2">
               Drishti AI Assistant
               <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#00B37E]/15 text-[#00B37E]">
-                Meerut Local Engine Active
+                {currentLocation?.city || 'Meerut'} Local Engine Active
               </span>
             </h3>
             <p className="text-xs text-slate-500 font-sans">
@@ -97,7 +118,8 @@ export default function AIAssistantView({ onTriggerAlert }) {
             <button
               key={idx}
               onClick={() => handleSend(p)}
-              className="text-xs px-3.5 py-2 rounded-xl bg-white border border-slate-200 hover:border-[#00B37E] hover:text-[#00B37E] text-slate-700 transition-all font-medium shadow-2xs text-left cursor-pointer active:scale-95"
+              disabled={isTyping}
+              className="text-xs px-3.5 py-2 rounded-xl bg-white border border-slate-200 hover:border-[#00B37E] hover:text-[#00B37E] text-slate-700 transition-all font-medium shadow-2xs text-left cursor-pointer active:scale-95 disabled:opacity-50"
             >
               {p}
             </button>
@@ -136,7 +158,7 @@ export default function AIAssistantView({ onTriggerAlert }) {
         {isTyping && (
           <div className="flex items-center gap-2 text-xs text-slate-400 font-mono italic pl-11">
             <Sparkles className="w-3.5 h-3.5 text-[#00B37E] animate-spin" />
-            <span>Drishti AI is analyzing Meerut downscaled telemetry...</span>
+            <span>Drishti is thinking...</span>
           </div>
         )}
       </div>
@@ -153,12 +175,13 @@ export default function AIAssistantView({ onTriggerAlert }) {
           type="text"
           value={inputVal}
           onChange={(e) => setInputVal(e.target.value)}
+          disabled={isTyping}
           placeholder="Ask Drishti AI about air quality in Meerut, picnics, mask advice, or travel delays..."
           className="flex-1 px-4 py-2 text-xs sm:text-sm text-slate-800 placeholder-slate-400 bg-transparent outline-none font-sans"
         />
         <button
           type="submit"
-          disabled={!inputVal.trim()}
+          disabled={!inputVal.trim() || isTyping}
           className="px-5 py-2.5 rounded-xl bg-[#00B37E] hover:bg-[#009B6D] text-white text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-1.5 cursor-pointer shadow-xs"
         >
           <span>Ask</span>

@@ -11,6 +11,7 @@ import SettingsView from './components/SettingsView';
 import ZoneSelectorModal from './components/ZoneSelectorModal';
 import Toast from './components/Toast';
 import DownscalingModal from './components/DownscalingModal';
+import AnalyticsView from './components/AnalyticsView';
 import { ZONES, POPULAR_SEARCH_LOCATIONS, DEFAULT_CITY } from './data/airData';
 
 export default function App() {
@@ -108,7 +109,7 @@ export default function App() {
         <main className="flex-1 p-5 sm:p-7 lg:p-9 space-y-6 overflow-y-auto">
           
           {/* TAB 1: HOME (Universal Public Advice: Picnics, Masks, Travel Delays) */}
-          {(activeTab === 'home' || activeTab === 'analytics') && (
+          {activeTab === 'home' && (
             <BreatheEasyHero
               zone={selectedZone}
               timeframe={timeframe}
@@ -121,6 +122,11 @@ export default function App() {
               currentLocation={currentLocation}
               onSelectLocation={setCurrentLocation}
             />
+          )}
+
+          {/* TAB 1.5: NATIONAL ANALYTICS & ML (Kaggle Dataset & Random Forest Model) */}
+          {activeTab === 'analytics' && (
+            <AnalyticsView currentLocation={currentLocation} />
           )}
 
           {/* TAB 2: WORKING MULTI-CITY MAP (LOCATIONS WITH REAL-TIME LANDMARK SWITCHER) */}
@@ -167,6 +173,8 @@ export default function App() {
           {activeTab === 'ai' && (
             <AIAssistantView 
               onTriggerAlert={handleTriggerAlert}
+              currentLocation={currentLocation}
+              selectedCity={selectedCity}
             />
           )}
 

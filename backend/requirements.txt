@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+lightgbm
+pandas
+requests
+scikit-learn
+anthropic
+groq
+google-generativeai
+google-genai
+kagglehub
+python-dotenv
+joblib
