@@ -1,7 +1,28 @@
-import React, { useState } from 'react';
-import { Sparkles, Send, Bot, User } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Sparkles, Send, Bot, User, RotateCcw } from 'lucide-react';
 import { askDrishti } from '../lib/api';
 import { CITIES_DATA } from '../data/airData';
+
+function getWelcomeMessage(loc) {
+  const placeName = loc?.name || loc?.city || 'your selected location';
+  const cityName = loc?.city ? `${loc.city}${loc.state ? `, ${loc.state}` : ''}` : loc?.state || 'your area';
+  const aqiText = loc?.aqi != null ? ` (Current AQI: ${loc.aqi})` : '';
+
+  return `Namaste! I am Drishti AI, your personal air intelligence assistant for ${placeName}${aqiText}. Ask me about real-time pollution across ${cityName}, whether it's a good time for outdoor activities or picnics, if you should wear a mask during your commute, and the optimal hours for opening home windows.`;
+}
+
+function getSamplePrompts(loc) {
+  const placeName = loc?.name || loc?.city || 'this area';
+  const cityName = loc?.city || loc?.state || 'the city';
+
+  return [
+    `Is now a good time for an outdoor walk or exercise around ${placeName}?`,
+    `Should sensitive groups wear an N95 mask today in ${cityName}?`,
+    `What is the best time to open apartment windows for fresh air in ${cityName}?`,
+    `How does the current air quality in ${placeName} compare to typical levels?`,
+    `Are there peak pollution hours to avoid for travel across ${cityName} today?`
+  ];
+}
 
 export default function AIAssistantView({ 
   onTriggerAlert, 
@@ -11,15 +32,32 @@ export default function AIAssistantView({
   lat: propLat,
   lon: propLon,
 }) {
-  const [messages, setMessages] = useState([
+  const [messages, setMessages] = useState(() => [
     {
       sender: 'ai',
-      text: "Namaste! I am Drishti AI, your personal air intelligence assistant for Meerut. Ask me about real-time pollution in your neighborhood, whether it's a good day for a picnic at Meerut Cantt, if you should wear a mask or delay your travel through Partapur, and when to open home windows.",
+      text: getWelcomeMessage(currentLocation),
       time: 'Just now',
     }
   ]);
   const [inputVal, setInputVal] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+
+  // Sync initial welcome message whenever currentLocation changes (if user hasn't chatted yet)
+  useEffect(() => {
+    setMessages((prev) => {
+      const hasUserMessages = prev.some((m) => m.sender === 'user');
+      if (!hasUserMessages) {
+        return [
+          {
+            sender: 'ai',
+            text: getWelcomeMessage(currentLocation),
+            time: 'Just now',
+          }
+        ];
+      }
+      return prev;
+    });
+  }, [currentLocation?.name, currentLocation?.city, currentLocation?.state, currentLocation?.aqi]);
 
   // Derive lat and lon from current selected location/city in app state, or fallback to Meerut
   const lat =
@@ -38,13 +76,18 @@ export default function AIAssistantView({
     (selectedCity && CITIES_DATA[selectedCity]?.center?.[1]) ??
     77.7064;
 
-  const samplePrompts = [
-    "Is today a good day for a picnic at Meerut Cantt or Pine Woodlands?",
-    "Should I wear an N95 mask for my road commute to Begum Bridge?",
-    "Should I delay my travel through Partapur Industrial Corridor?",
-    "What is the best time to open my apartment windows in Shastri Nagar?",
-    "Can I go for an evening walk around Nauchandi Grounds tonight?"
-  ];
+  const samplePrompts = useMemo(() => getSamplePrompts(currentLocation), [currentLocation]);
+
+  const handleResetChat = () => {
+    setMessages([
+      {
+        sender: 'ai',
+        text: getWelcomeMessage(currentLocation),
+        time: 'Just now',
+      }
+    ]);
+    setInputVal('');
+  };
 
   const handleSend = async (textToSend) => {
     const query = (typeof textToSend === 'string' ? textToSend : inputVal).trim();
@@ -98,20 +141,32 @@ export default function AIAssistantView({
             <h3 className="text-xl font-black text-ink-900 font-sans flex items-center gap-2">
               Drishti AI Assistant
               <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-lime/40 text-ink-900 border border-lime/60">
-                {currentLocation?.city || 'Meerut'} Local Engine Active
+                {currentLocation?.city || currentLocation?.name || 'Local'} Active
               </span>
             </h3>
             <p className="text-xs text-slate-500 font-sans">
-              Personalized air quality guidance for your neighborhood, commute, picnic plans, and home ventilation
+              Personalized air quality guidance for {currentLocation?.name || currentLocation?.city || 'your area'}, commute, outdoor plans, and home ventilation
             </p>
           </div>
         </div>
+
+        {messages.length > 1 && (
+          <button
+            type="button"
+            onClick={handleResetChat}
+            className="flex items-center gap-1.5 text-xs font-mono font-bold text-slate-500 hover:text-ink-900 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 transition-all cursor-pointer"
+            title="Reset conversation for current location"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>New Chat</span>
+          </button>
+        )}
       </div>
 
       {/* Suggested Questions */}
       <div className="space-y-2">
         <span className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono">
-          Popular Questions for Meerut
+          Popular Questions for {currentLocation?.city || currentLocation?.name || 'Your Location'}
         </span>
         <div className="flex flex-wrap gap-2">
           {samplePrompts.map((p, idx) => (
@@ -179,7 +234,7 @@ export default function AIAssistantView({
           onChange={(e) => setInputVal(e.target.value)}
           disabled={isTyping}
           aria-label="Ask Drishti AI about air quality"
-          placeholder="Ask Drishti AI about air quality in Meerut, picnics, mask advice, or travel delays..."
+          placeholder={`Ask Drishti AI about air quality in ${currentLocation?.name || currentLocation?.city || 'your area'}, outdoor plans, or mask advice...`}
           className="flex-1 py-2 text-xs sm:text-sm text-ink-900 placeholder-slate-400 bg-transparent outline-none font-sans"
         />
         <button
