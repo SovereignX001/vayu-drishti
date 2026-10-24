@@ -1,10 +1,6 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
   "rewrites": [
-    {
-      "source": "/((?!api/|data/).*)",
-      "destination": "/index.html"
-    }
+    { "source": "/api/:path*", "destination": "https://vayu-drishti-gkm6.onrender.com/:path*" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
