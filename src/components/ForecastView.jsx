@@ -90,7 +90,9 @@ export default function ForecastView({
     fetchMetrics();
   }, []);
 
-  const activeCityKey = useMemo(() => {
+  const [selectedReferenceCity, setSelectedReferenceCity] = useState(null);
+
+  const matchedCityKey = useMemo(() => {
     if (!metricsData) return null;
     const availableCities = Object.keys(metricsData);
     const textToSearch = `${gpsData.city || ''} ${gpsData.name || ''} ${gpsData.region || ''}`.toLowerCase();
@@ -105,7 +107,9 @@ export default function ForecastView({
     return null;
   }, [metricsData, gpsData.city, gpsData.name, gpsData.region, gpsData.lat, gpsData.lng]);
 
-  const cityMetrics = activeCityKey ? metricsData[activeCityKey] : null;
+  const activeCityKey = matchedCityKey || selectedReferenceCity || 'Meerut';
+  const cityMetrics = metricsData ? metricsData[activeCityKey] : null;
+  const isDirectCityMatch = Boolean(matchedCityKey);
 
   // Sync when currentLocation changes
   useEffect(() => {
@@ -423,16 +427,48 @@ export default function ForecastView({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-auto px-3.5 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-xs font-mono font-bold text-slate-700 shadow-2xs">
-            <span className={`w-2 h-2 rounded-full ${cityMetrics ? 'bg-[#00875A]' : 'bg-slate-400'} animate-pulse`} />
-            <span>{activeCityKey ? `Evaluation: ${activeCityKey}` : 'Not evaluated for this city'}</span>
-            {metricsData?.stale && (
-              <span className="text-[10px] font-semibold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-md">
-                Offline ({formatTimeAgo(metricsData.savedAt)})
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-xs font-mono font-bold text-slate-700 shadow-2xs">
+              <span className={`w-2 h-2 rounded-full ${cityMetrics ? 'bg-[#00875A]' : 'bg-slate-400'} animate-pulse`} />
+              <span>{isDirectCityMatch ? `Evaluation: ${activeCityKey}` : `Benchmark Split: ${activeCityKey}`}</span>
+              {metricsData?.stale && (
+                <span className="text-[10px] font-semibold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-md">
+                  Offline ({formatTimeAgo(metricsData.savedAt)})
+                </span>
+              )}
+            </div>
+            {!isDirectCityMatch && (
+              <span className="text-[11px] font-mono text-slate-400 font-medium hidden sm:inline">
+                ({gpsData.city || gpsData.name} outside 8-city training split)
               </span>
             )}
           </div>
         </div>
+
+        {/* City Benchmark Switcher when viewing an un-evaluated location */}
+        {!isLoadingMetrics && !isDirectCityMatch && metricsData && (
+          <div className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono">
+            <span className="text-slate-600 font-semibold font-sans">
+              Inspect model validation benchmarks across evaluated regions:
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.keys(metricsData).map((city) => (
+                <button
+                  key={city}
+                  type="button"
+                  onClick={() => setSelectedReferenceCity(city)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    activeCityKey === city
+                      ? 'bg-ink-900 text-white shadow-2xs'
+                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {city}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Loading state */}
         {isLoadingMetrics && (
