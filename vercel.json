@@ -1,8 +1,5 @@
 {
   "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "https://vayu-drishti-gkm6.onrender.com/"
-    }
+    { "source": "/api/:path*", "destination": "https://vayu-drishti-gkm6.onrender.com/:path*" }
   ]
 }
