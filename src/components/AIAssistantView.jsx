@@ -27,28 +27,18 @@ function getSamplePrompts(loc) {
 function renderFormattedMessage(text) {
   if (!text) return null;
 
-  const lines = text.split('\n');
+  // Do not render raw asterisks or markdown symbols
+  const cleanText = text.replace(/[*#`_~]/g, '');
+  const lines = cleanText.split('\n');
 
   return lines.map((line, lineIdx) => {
     if (!line.trim()) {
       return <div key={lineIdx} className="h-2" />;
     }
 
-    const parts = line.split(/(\*\*[^*]+?\*\*)/g);
-
     return (
       <p key={lineIdx} className="leading-relaxed mb-1.5 last:mb-0">
-        {parts.map((part, partIdx) => {
-          if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
-            const boldText = part.slice(2, -2);
-            return (
-              <strong key={partIdx} className="font-bold">
-                {boldText}
-              </strong>
-            );
-          }
-          return part;
-        })}
+        {line}
       </p>
     );
   });
@@ -220,31 +210,49 @@ export default function AIAssistantView({
 
       {/* Chat Messages Log */}
       <div className="p-5 sm:p-7 rounded-[32px] bg-white border border-slate-100 shadow-soft space-y-4 min-h-[380px] max-h-[500px] overflow-y-auto">
-        {messages.map((m, idx) => (
-          <div
-            key={idx}
-            className={`flex items-start gap-3 ${m.sender === 'user' ? 'flex-row-reverse' : ''}`}
-          >
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-bold ${
-              m.sender === 'user' ? 'bg-ink-900' : 'bg-accent shadow-xs'
-            }`}>
-              {m.sender === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
-            </div>
+        {messages.map((m, idx) => {
+          const isLatest = idx === messages.length - 1;
+          const showTellMeMore = isLatest && m.sender === 'ai' && !isTyping && idx > 0;
+          return (
+            <div key={idx} className="space-y-2">
+              <div
+                className={`flex items-start gap-3 ${m.sender === 'user' ? 'flex-row-reverse' : ''}`}
+              >
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-bold ${
+                  m.sender === 'user' ? 'bg-ink-900' : 'bg-accent shadow-xs'
+                }`}>
+                  {m.sender === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                </div>
 
-            <div className={`max-w-[85%] p-4 text-xs sm:text-sm leading-relaxed ${
-              m.sender === 'user'
-                ? 'bg-ink-900 text-white rounded-[22px] rounded-tr-xs shadow-2xs'
-                : 'bg-[#F4F8F7] border border-slate-200/60 text-ink-900 rounded-[22px] rounded-tl-xs font-medium shadow-2xs'
-            }`}>
-              {renderFormattedMessage(m.text)}
-              <span className={`text-[10px] mt-1.5 block font-mono ${
-                m.sender === 'user' ? 'text-slate-400 text-right' : 'text-slate-400'
-              }`}>
-                {m.time}
-              </span>
+                <div className={`max-w-[85%] sm:max-w-[65ch] p-4 text-sm leading-relaxed ${
+                  m.sender === 'user'
+                    ? 'bg-ink-900 text-white rounded-[22px] rounded-tr-xs shadow-2xs'
+                    : 'bg-[#F4F8F7] border border-slate-200/60 text-ink-900 rounded-[22px] rounded-tl-xs font-medium shadow-2xs'
+                }`}>
+                  {renderFormattedMessage(m.text)}
+                  <span className={`text-[10px] mt-1.5 block font-mono ${
+                    m.sender === 'user' ? 'text-slate-400 text-right' : 'text-slate-400'
+                  }`}>
+                    {m.time}
+                  </span>
+                </div>
+              </div>
+
+              {showTellMeMore && (
+                <div className="pl-11">
+                  <button
+                    type="button"
+                    onClick={() => handleSend("Explain why in a bit more detail")}
+                    disabled={isTyping}
+                    className="text-xs px-3.5 py-1.5 rounded-full bg-white border border-slate-200/80 hover:border-accent hover:text-accent text-slate-700 transition-all font-semibold shadow-2xs cursor-pointer active:scale-95 disabled:opacity-50"
+                  >
+                    Tell me more
+                  </button>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         {isTyping && (
           <div className="flex items-center gap-2 text-xs text-slate-400 font-mono italic pl-11">

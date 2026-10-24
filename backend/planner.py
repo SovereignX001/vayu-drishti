@@ -14,6 +14,7 @@ _CAMS_WEATHER_CACHE: Dict[Tuple[float, float], Dict[str, Any]] = {}
 # than lighter activities (walking, ventilation).
 ACTIVITY_PROFILES: Dict[str, Dict[str, Any]] = {
     "running": {
+        "key": "running",
         "name": "running",
         "aliases": ["run", "running", "jog", "jogging", "5km", "10km", "marathon", "sprint"],
         "default_duration_min": 60,
@@ -25,8 +26,9 @@ ACTIVITY_PROFILES: Dict[str, Dict[str, Any]] = {
         "indoor_alternative": "Move your run indoors to a treadmill in a HEPA-filtered room, or substitute with indoor bodyweight cardio.",
     },
     "cycling": {
+        "key": "cycling",
         "name": "cycling",
-        "aliases": ["cycling", "cycl", "bike", "biking", "bicycle", "cycle to work"],
+        "aliases": ["cycling", "cycl", "biking", "bicycle"],
         "default_duration_min": 60,
         "ideal_max_aqi": 50,
         "acceptable_max_aqi": 100,
@@ -36,8 +38,9 @@ ACTIVITY_PROFILES: Dict[str, Dict[str, Any]] = {
         "indoor_alternative": "Use an indoor stationary trainer or gym spin bike in an air-purified space.",
     },
     "outdoor_workout": {
+        "key": "outdoor_workout",
         "name": "outdoor workout",
-        "aliases": ["workout", "outdoor sports", "sports", "cricket", "football", "calisthenics", "training", "exercise outside"],
+        "aliases": ["workout", "outdoor sports", "sports", "cricket", "football", "calisthenics", "training", "exercise outside", "gym", "badminton"],
         "default_duration_min": 60,
         "ideal_max_aqi": 50,
         "acceptable_max_aqi": 100,
@@ -47,6 +50,7 @@ ACTIVITY_PROFILES: Dict[str, Dict[str, Any]] = {
         "indoor_alternative": "Shift resistance training or circuit work to an air-conditioned indoor facility or home gym.",
     },
     "kids_play": {
+        "key": "kids_play",
         "name": "kids playing outside",
         "aliases": ["kids playing outside", "kids_play", "kids", "children", "child", "play", "playground", "park with kid"],
         "default_duration_min": 60,
@@ -58,8 +62,9 @@ ACTIVITY_PROFILES: Dict[str, Dict[str, Any]] = {
         "indoor_alternative": "Keep playtime indoors with games, puzzles, or visit an indoor community activity center.",
     },
     "outdoor_walk": {
-        "name": "outdoor walk / picnic",
-        "aliases": ["walk", "outdoor walk", "walking", "picnic", "park", "stroll", "evening walk", "morning walk"],
+        "key": "outdoor_walk",
+        "name": "outdoor walk",
+        "aliases": ["walk", "outdoor walk", "walking", "stroll", "evening walk", "morning walk"],
         "default_duration_min": 60,
         "ideal_max_aqi": 75,
         "acceptable_max_aqi": 130,
@@ -68,18 +73,32 @@ ACTIVITY_PROFILES: Dict[str, Dict[str, Any]] = {
         "preferred_wind_rain": "Dry conditions with mild breeze (4-12 km/h).",
         "indoor_alternative": "Take a walking stroll inside a ventilated shopping center or large indoor facility.",
     },
+    "picnic": {
+        "key": "picnic",
+        "name": "picnic or outing",
+        "aliases": ["picnic", "outing", "park picnic", "picnic or outing"],
+        "default_duration_min": 120,
+        "ideal_max_aqi": 50,
+        "acceptable_max_aqi": 100,
+        "sensitive_ideal_max_aqi": 35,
+        "sensitive_acceptable_max_aqi": 60,
+        "preferred_wind_rain": "Dry conditions with mild breeze (4-12 km/h).",
+        "indoor_alternative": "Plan an indoor family outing or visit an indoor venue instead.",
+    },
     "commute": {
-        "name": "commute",
-        "aliases": ["commute", "travel", "drive", "road commute", "office commute", "travel to work"],
+        "key": "commute",
+        "name": "commute or travel",
+        "aliases": ["commute", "travel", "drive", "road commute", "office commute", "travel to work", "office", "work", "market", "school run"],
         "default_duration_min": 45,
         "ideal_max_aqi": 100,
         "acceptable_max_aqi": 150,
         "sensitive_ideal_max_aqi": 50,
         "sensitive_acceptable_max_aqi": 100,
         "preferred_wind_rain": "Keep vehicle windows rolled up with air conditioning on recirculation mode.",
-        "indoor_alternative": "Wear a snug, certified N95 respirator mask for outdoor transit, and keep vehicle cabin air on recirculate.",
+        "indoor_alternative": "Wear an N95 mask on two-wheelers or walking, and keep car windows closed with air recirculation on.",
     },
     "open_windows": {
+        "key": "open_windows",
         "name": "opening windows / ventilation",
         "aliases": ["open windows", "window", "windows", "ventilation", "ventilate", "air out", "fresh air in house"],
         "default_duration_min": 60,
@@ -91,6 +110,7 @@ ACTIVITY_PROFILES: Dict[str, Dict[str, Any]] = {
         "indoor_alternative": "Keep windows firmly shut and run a standalone HEPA air purifier on medium or high fan speed.",
     },
     "outdoor_yoga": {
+        "key": "outdoor_yoga",
         "name": "outdoor yoga",
         "aliases": ["yoga", "outdoor yoga", "pranayama", "meditation outside", "pilates outside"],
         "default_duration_min": 60,
@@ -101,36 +121,158 @@ ACTIVITY_PROFILES: Dict[str, Dict[str, Any]] = {
         "preferred_wind_rain": "Calm wind (2-8 km/h), comfortable temperature (18-28°C); deep yogic inhalation demands clean air.",
         "indoor_alternative": "Practice pranayama and asanas in a quiet indoor room equipped with an active HEPA filter.",
     },
+    "general_outdoor": {
+        "key": "general_outdoor",
+        "name": "stepping outside",
+        "aliases": ["general_outdoor", "outside", "go outside", "stepping out", "outdoor air", "is the air ok"],
+        "default_duration_min": 45,
+        "ideal_max_aqi": 75,
+        "acceptable_max_aqi": 130,
+        "sensitive_ideal_max_aqi": 40,
+        "sensitive_acceptable_max_aqi": 80,
+        "preferred_wind_rain": "Dry conditions with mild breeze.",
+        "indoor_alternative": "Limit outdoor exposure, or wear a mask if you need to step outside.",
+    },
 }
+
+
+def detect_activity(question: str, history: Optional[list] = None) -> Dict[str, Any]:
+    """
+    Activity intent detector with strict conflict resolution.
+    Returns: { "activity": str, "confidence": str, "subject": str }
+    Never defaults to running or workout for unknown or general questions.
+    """
+    ql = question.lower().strip()
+
+    # 1. Nonsense or Incomprehensible query guard
+    if len(ql) < 3 or (not re.search(r"[a-z]{3,}", ql) and not re.search(r"\d", ql)):
+        return {"activity": "unknown", "confidence": "low", "subject": "unknown request"}
+    if all(c in "asdfghjklqwertyuiopzxcvbnm1234567890" for c in ql[:6]) and len(ql.split()) <= 1 and not any(w in ql for w in ["run", "jog", "walk", "cycl", "bike"]):
+        return {"activity": "unknown", "confidence": "low", "subject": "unknown request"}
+
+    # 2. Check for follow-up temporal query (e.g. "what about tomorrow?", "how about later?")
+    temporal_match = re.search(r"\b(?:what|how)\s+about\s+(?:tomorrow|later|this\s+evening|tonight|next\s+week)\b", ql) or ql in ["what about tomorrow?", "what about tomorrow", "how about tomorrow?", "tomorrow?"]
+    if temporal_match:
+        if history:
+            for turn in reversed(history):
+                txt = turn.get("text", "")
+                if txt and txt.strip() and not re.search(r"\b(?:what|how)\s+about\b", txt.lower()):
+                    past_det = detect_activity(txt, history=None)
+                    if past_det["activity"] not in ("unknown", "general_outdoor") and past_det["confidence"] != "low":
+                        return {
+                            "activity": past_det["activity"],
+                            "confidence": "high",
+                            "subject": past_det["subject"],
+                        }
+
+    # 3. Commute & Office (Highest specificity over generic cycling or walking)
+    commute_patterns = [
+        r"\b(?:bike|cycle|ride|drive|walk|commute|go|travel|head)\s+to\s+(?:the\s+)?(?:office|work|job|workplace|school|market|station|metro)\b",
+        r"\b(?:take\s+(?:my\s+)?(?:bike|cycle|car|scooter|auto|cab|bus|metro)\s+to\s+(?:the\s+)?(?:office|work|job|school|market))\b",
+        r"\b(?:office|commute|workplace)\b",
+        r"\b(?:travel\s+to\s+work|go\s+to\s+work|heading\s+to\s+work|driving\s+to\s+work|ride\s+to\s+work)\b",
+        r"\b(?:drop|pick\s*up)\s+(?:my\s+)?(?:kids?|children|child|son|daughter)\s*(?:to|from|at)?\s*(?:school)?\b",
+        r"\b(?:school\s*run)\b",
+        r"\b(?:to|in|at)\s+(?:the\s+)?(?:market|bazaar|grocery|groceries|shopping|errands|bank)\b",
+        r"\b(?:market|shopping|errands)\b",
+    ]
+    if any(re.search(pat, ql) for pat in commute_patterns):
+        return {"activity": "commute", "confidence": "high", "subject": "commute or travel"}
+
+    # 4. Running / Jogging
+    running_patterns = [
+        r"\b(?:runs?|running|jogs?|jogging|5k|5km|10k|10km|sprints?|marathon)\b"
+    ]
+    if any(re.search(pat, ql) for pat in running_patterns):
+        return {"activity": "running", "confidence": "high", "subject": "running"}
+
+    # 5. Ventilation / Windows
+    window_patterns = [
+        r"\b(?:windows?|ventilat(?:e|ion|ing)|balcony|air\s*purifier|air\s*out)\b"
+    ]
+    if any(re.search(pat, ql) for pat in window_patterns):
+        return {"activity": "open_windows", "confidence": "high", "subject": "opening windows"}
+
+    # 6. Outdoor Workout / Sports
+    workout_patterns = [
+        r"\b(?:gym|workout|exercise|training|cricket|football|soccer|badminton|tennis|basketball|volleyball|calisthenics|sports|match)\b"
+    ]
+    if any(re.search(pat, ql) for pat in workout_patterns):
+        return {"activity": "outdoor_workout", "confidence": "high", "subject": "sports or workout"}
+
+    # 7. Kids Play
+    kids_patterns = [
+        r"\b(?:kids?|children|child|baby|toddler)\s+(?:play(?:ing)?|playground|outside|park)\b",
+        r"\bplay(?:ing)?\s+(?:with\s+)?(?:kids?|children|child)\b",
+        r"\bplay(?:ing)?\s+outside\b"
+    ]
+    if any(re.search(pat, ql) for pat in kids_patterns):
+        return {"activity": "kids_play", "confidence": "high", "subject": "kids playing outside"}
+
+    # 8. Outdoor Yoga
+    yoga_patterns = [
+        r"\b(?:yoga|pranayam(?:a)?|meditat(?:e|ion)|pilates)\b"
+    ]
+    if any(re.search(pat, ql) for pat in yoga_patterns):
+        return {"activity": "outdoor_yoga", "confidence": "high", "subject": "outdoor yoga"}
+
+    # 9. Picnic / Outing
+    picnic_patterns = [
+        r"\b(?:picnic|outing|park\s+visit)\b"
+    ]
+    if any(re.search(pat, ql) for pat in picnic_patterns):
+        return {"activity": "picnic", "confidence": "high", "subject": "picnic or outing"}
+
+    # 10. Cycling (standalone, non-commute)
+    cycling_patterns = [
+        r"\b(?:cycl(?:e|ing|ist)|biking|bicycle)\b",
+        r"\bbike\b"
+    ]
+    if any(re.search(pat, ql) for pat in cycling_patterns):
+        return {"activity": "cycling", "confidence": "high", "subject": "cycling"}
+
+    # 11. Walking
+    walk_patterns = [
+        r"\b(?:walk(?:ing|s)?|stroll(?:ing)?)\b"
+    ]
+    if any(re.search(pat, ql) for pat in walk_patterns):
+        return {"activity": "outdoor_walk", "confidence": "high", "subject": "outdoor walk"}
+
+    # 12. General Outdoor / Stepping outside / Air check
+    general_patterns = [
+        r"\b(?:is\s+the\s+air\s+ok|should\s+i\s+go\s+out(?:side)?|is\s+it\s+safe\s+to\s+go\s+out(?:side)?|can\s+i\s+go\s+out(?:side)?|going\s+out(?:side)?|step\s+out(?:side)?|head\s+outside|be\s+outside|stay\s+outside|i\s+am\s+going\s+outside)\b",
+        r"\b(?:outside|outdoors?)\b"
+    ]
+    if any(re.search(pat, ql) for pat in general_patterns):
+        return {"activity": "general_outdoor", "confidence": "medium", "subject": "stepping outside"}
+
+    # If completely unrecognized, default to general_outdoor with low confidence (NEVER running or workout)
+    return {"activity": "general_outdoor", "confidence": "low", "subject": "going outside"}
 
 
 def normalize_activity(activity_str: str) -> Dict[str, Any]:
     """Find matching activity profile from query text or alias."""
     if not activity_str:
-        return ACTIVITY_PROFILES["outdoor_walk"]
+        return ACTIVITY_PROFILES["general_outdoor"]
 
     act_lower = activity_str.lower().strip()
+    if act_lower in ACTIVITY_PROFILES:
+        return ACTIVITY_PROFILES[act_lower]
+
     for key, prof in ACTIVITY_PROFILES.items():
         if key in act_lower:
             return prof
-        for alias in prof["aliases"]:
+        for alias in prof.get("aliases", []):
             if alias in act_lower or act_lower in alias:
                 return prof
 
-    if any(w in act_lower for w in ["run", "jog", "sprint"]):
-        return ACTIVITY_PROFILES["running"]
-    if any(w in act_lower for w in ["cycl", "bike"]):
-        return ACTIVITY_PROFILES["cycling"]
-    if any(w in act_lower for w in ["kid", "child", "play"]):
-        return ACTIVITY_PROFILES["kids_play"]
-    if any(w in act_lower for w in ["window", "ventil"]):
-        return ACTIVITY_PROFILES["open_windows"]
-    if any(w in act_lower for w in ["yoga", "meditat", "pranayam"]):
-        return ACTIVITY_PROFILES["outdoor_yoga"]
-    if any(w in act_lower for w in ["commute", "travel", "drive", "work"]):
-        return ACTIVITY_PROFILES["commute"]
+    # Use strict intent detector rather than guessing workout
+    det = detect_activity(activity_str)
+    act_key = det.get("activity")
+    if act_key in ACTIVITY_PROFILES:
+        return ACTIVITY_PROFILES[act_key]
 
-    return ACTIVITY_PROFILES["outdoor_walk"]
+    return ACTIVITY_PROFILES["general_outdoor"]
 
 
 def _format_time_str(dt: datetime) -> str:
@@ -605,6 +747,80 @@ def plan_activity(
     }
 
 
+ACTIVITY_CONFIG = {
+    "commute": {
+        "verb": "head to the office or commute",
+        "safe_now_tip": "Keep vehicle windows closed with air recirculation on, and carry an N95 mask.",
+        "safe_later_tip": "If commuting on a two-wheeler or walking, wear an N95 mask and keep car windows closed.",
+        "no_safe_tip": "Wear an N95 mask on the road and keep car windows rolled up with air recirculation on.",
+        "default_tip": "Keep vehicle windows closed and wear an N95 mask during traffic hours.",
+    },
+    "running": {
+        "verb": "go for a run",
+        "safe_now_tip": "Stay well hydrated and enjoy your time outside.",
+        "safe_later_tip": "Try an indoor activity until then, and keep windows closed.",
+        "no_safe_tip": "Try an indoor workout instead, and keep your windows closed.",
+        "default_tip": "Drink plenty of water and plan your runs for cleaner hours.",
+    },
+    "cycling": {
+        "verb": "cycle outdoors",
+        "safe_now_tip": "Stay well hydrated and enjoy your ride outside.",
+        "safe_later_tip": "Ride on an indoor trainer until then, and keep windows closed.",
+        "no_safe_tip": "Use an indoor exercise bike instead, and keep your windows closed.",
+        "default_tip": "Drink plenty of water and avoid cycling along heavy traffic corridors.",
+    },
+    "outdoor_workout": {
+        "verb": "exercise outdoors",
+        "safe_now_tip": "Stay well hydrated and take regular breathers.",
+        "safe_later_tip": "Move your session to an indoor gym until air quality clears.",
+        "no_safe_tip": "Exercise indoors today, and keep your windows closed.",
+        "default_tip": "Stay well hydrated and move intense cardio indoors when air is dusty.",
+    },
+    "kids_play": {
+        "verb": "let children play outside",
+        "safe_now_tip": "Keep play sessions moderate and ensure kids drink water.",
+        "safe_later_tip": "Plan indoor games or puzzles until the air clears up.",
+        "no_safe_tip": "Keep playtime indoors with games or books, and keep windows shut.",
+        "default_tip": "Encourage indoor creative play when outdoor dust levels are high.",
+    },
+    "outdoor_walk": {
+        "verb": "go for a walk",
+        "safe_now_tip": "Stay well hydrated and enjoy your stroll outside.",
+        "safe_later_tip": "Take a short indoor walk or wait until the air clears.",
+        "no_safe_tip": "Take a walk indoors inside a mall or shopping center instead.",
+        "default_tip": "Plan gentle walks during the afternoon when sunlight warms the ground.",
+    },
+    "picnic": {
+        "verb": "go for a picnic or outing",
+        "safe_now_tip": "Pack plenty of drinking water and enjoy your outing.",
+        "safe_later_tip": "Plan an indoor outing until weather and air improve.",
+        "no_safe_tip": "Plan an indoor family visit or indoor games instead today.",
+        "default_tip": "Pack plenty of drinking water and choose grassy parks away from busy roads.",
+    },
+    "open_windows": {
+        "verb": "open your windows",
+        "safe_now_tip": "Air out your rooms briefly and close windows if dust rises.",
+        "safe_later_tip": "Keep windows closed for now and run an air purifier if you have one.",
+        "no_safe_tip": "Keep your windows firmly closed and run an air purifier indoors.",
+        "default_tip": "Keep windows closed during early morning rush hours to protect indoor air.",
+    },
+    "outdoor_yoga": {
+        "verb": "practice yoga outside",
+        "safe_now_tip": "Focus on gentle breathing and enjoy the calm outdoor air.",
+        "safe_later_tip": "Practice your asanas and pranayama indoors for now.",
+        "no_safe_tip": "Practice your yoga and deep breathing indoors in a clean room.",
+        "default_tip": "Practice deep yogic breathing in a clean, dust-free indoor space.",
+    },
+    "general_outdoor": {
+        "verb": "step outside",
+        "safe_now_tip": "Stay well hydrated and protect yourself from dusty air.",
+        "safe_later_tip": "Try to finish indoor tasks first before stepping outside later.",
+        "no_safe_tip": "Limit your time outdoors and wear a mask if you need to step out.",
+        "default_tip": "Limit prolonged outdoor exposure and stay well hydrated today.",
+    },
+}
+
+
 def _format_activity_answer(
     activity_name: str,
     status: str,
@@ -624,72 +840,69 @@ def _format_activity_answer(
     duration_min: int,
 ) -> str:
     """
-    Format answer in strict accordance with Task 3:
-    Order:
-    1) Verdict in one sentence.
-    2) Why, using 2-3 real numbers (current AQI with scale named once, dominant pollutant, wind, temp/humidity).
-    3) When: exact windows with weekday, date and local time (best first, plus one backup).
-    4) If no safe window: plain statement, least-bad time with AQI, alternative, and condition to change it.
-    5) Brief caveat only when relevant (accuracy drops beyond 24h).
-    Strict rules: NO MARKDOWN (no asterisks, headers, or bullet symbols). Plain paragraphs. 4-7 sentences.
+    Format activity answers in short, plain language (2 to 4 sentences, 40 to 70 words):
+    Sentence 1: The direct answer in plain words.
+    Sentence 2: ONE simple reason using at most ONE number.
+    Sentence 3: What to do and when, with exact time if available.
+    Sentence 4: Very short practical tip tailored to the specific activity.
     """
-    sens_note = " for sensitive individuals" if sensitive else ""
-    paragraphs = []
+    act_key = profile.get("key") or next((k for k in ACTIVITY_CONFIG if k in activity_name.lower()), "general_outdoor")
+    cfg = ACTIVITY_CONFIG.get(act_key, ACTIVITY_CONFIG["general_outdoor"])
 
-    # 1. Verdict & Why (Paragraph 1)
+    # Sentence 1: Answer in plain words
     if status == "SAFE_NOW":
-        verdict = f"You can proceed with your {activity_name} right now{sens_note}."
-    elif status == "SAFE_LATER":
-        best_time = safe_windows[0]["time_range"] if safe_windows else "later today"
-        verdict = f"It is better to wait until {best_time} for your {activity_name}{sens_note}."
+        if sensitive:
+            s1 = f"It is safe enough to {cfg['verb']} right now, but please keep exertion light."
+        else:
+            s1 = f"Yes, it is fine to {cfg['verb']} right now."
+    elif status == "SAFE_LATER" and safe_windows:
+        w_first = safe_windows[0]
+        start_t = w_first["time_range"].split("-")[0].strip()
+        day_str = w_first["relative_day"].lower()
+        s1 = f"Wait until {day_str} at {start_t} before you {cfg['verb']}."
     elif status == "NO_SAFE_WINDOW":
-        verdict = f"There are no safe outdoor windows for your {activity_name}{sens_note} within the current {horizon_text}."
+        s1 = f"It is not a good time to {cfg['verb']} today."
     else:
-        verdict = f"Outdoor telemetry is currently inconclusive for scheduling your {activity_name}."
+        s1 = f"It is best to wait before you {cfg['verb']}."
 
-    why = (
-        f"Air quality currently measures AQI {current_aqi} (US scale) with {dominant_pollutant} as the primary driver, "
-        f"alongside a wind speed of {round(wind_now, 1)} km/h and temperature of {round(temp_now, 1)}°C at {round(humidity_now)}% relative humidity."
-    )
-    paragraphs.append(f"{verdict} {why}")
+    # Sentence 2: Reason with at most ONE number
+    if current_aqi <= 50:
+        s2 = f"The air is clean and fresh today with an AQI of {current_aqi}."
+    elif current_aqi <= 100:
+        s2 = f"The air is fairly clean today with an AQI of {current_aqi}."
+    elif current_aqi <= 150:
+        s2 = f"The air is somewhat dirty today with an AQI of {current_aqi}."
+    else:
+        s2 = f"The air is quite dirty today with an AQI of {current_aqi}."
 
-    # 2. When / Windows or Least-Bad Window (Paragraph 2)
-    if status in ("SAFE_NOW", "SAFE_LATER") and safe_windows:
-        w1 = safe_windows[0]
-        w1_str = f"{w1['relative_day']}, {w1['weekday']} {w1['date']}, {w1['time_range']}, with AQI about {w1['max_aqi']} due to {w1['reason']}"
-        when_text = f"The primary window opens {w1_str}."
-
-        if len(safe_windows) > 1:
-            w2 = safe_windows[1]
-            w2_str = f"{w2['relative_day']}, {w2['weekday']} {w2['date']}, {w2['time_range']}, with AQI around {w2['max_aqi']}"
-            when_text += f" A viable backup window occurs {w2_str}."
-
-        paragraphs.append(when_text)
+    # Sentence 3: When / What to do
+    if status == "SAFE_NOW":
+        s3 = "Air quality is at its best now, so complete your plans before pollution builds up."
+    elif status == "SAFE_LATER" and safe_windows:
+        best_w = safe_windows[0]
+        best_time = best_w["time_range"].split("-")[0].strip()
+        s3 = f"The best time is {best_w['relative_day'].lower()} around {best_time} when the air gets cleaner."
     elif status == "NO_SAFE_WINDOW" and least_bad_window:
         lb = least_bad_window
-        lb_str = f"{lb['relative_day']}, {lb['weekday']} {lb['date']}, between {lb['time_range']} when AQI reaches a lowest point of {lb['max_aqi']}"
-        no_window_text = (
-            f"The least-bad period in the entire outlook is {lb_str}. "
-            f"Because this remains above the acceptable threshold of {profile['acceptable_max_aqi']} AQI, {profile['indoor_alternative']} "
-            f"The regional AQI trend remains {trend}. {change_condition}"
-        )
-        paragraphs.append(no_window_text)
+        lb_t = lb["time_range"].split("-")[0].strip()
+        s3 = f"There are no clean hours in the forecast, though {lb['relative_day'].lower()} at {lb_t} has the least dirt."
+    else:
+        s3 = "There are no clean hours in the current forecast."
 
-    # 3. Caveat
-    caveat_parts = []
-    if not cams_available:
-        caveat_parts.append("Extended multi-day satellite data was temporarily unreachable, so this forecast is limited to the next 24 hours.")
-    elif any(w.get("confidence") == "low" for w in (safe_windows or [least_bad_window] if least_bad_window else [])):
-        caveat_parts.append("Forecast reliability naturally decreases beyond 24 hours, and these metrics reflect regional airshed models rather than a sensor at your specific doorstep.")
+    # Sentence 4: Short tip / alternative strictly matched to activity
+    if status == "SAFE_NOW":
+        s4 = cfg["safe_now_tip"]
+    elif status == "SAFE_LATER":
+        s4 = cfg["safe_later_tip"]
+    elif status == "NO_SAFE_WINDOW":
+        s4 = cfg["no_safe_tip"]
+    else:
+        s4 = cfg["default_tip"]
 
-    if caveat_parts:
-        paragraphs.append(" ".join(caveat_parts))
-
-    # Strip any stray markdown symbols (asterisks, bullet points, hashes)
-    full_text = "\n\n".join(paragraphs)
-    full_text = re.sub(r"\*+", "", full_text)
-    full_text = re.sub(r"^[•\-\*#]+\s*", "", full_text, flags=re.MULTILINE)
-    return full_text.strip()
+    summary = f"{s1} {s2} {s3} {s4}"
+    summary = re.sub(r"[*#`]", "", summary)
+    summary = re.sub(r"\s+", " ", summary).strip()
+    return summary
 
 
 # ---------------------------------------------------------------------------
