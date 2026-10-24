@@ -2,6 +2,13 @@ import metricsFallback from '../data/metricsFallback.js';
 
 const API = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || '/api';
 
+// Wake sleeping backend once on app load (silently, errors ignored)
+if (typeof fetch !== 'undefined') {
+  try {
+    fetch(`${API}/metrics`).catch(() => {});
+  } catch {}
+}
+
 const CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 function saveCache(key, data) {
@@ -189,7 +196,7 @@ export async function getForecast(lat, lon) {
     const res = await fetchWithTimeout(
       `${API}/forecast?lat=${lat}&lon=${lon}`,
       {},
-      8000,
+      45000,
       'Forecast service timed out. Please try again.'
     );
     const data = await res.json();
@@ -256,7 +263,7 @@ export async function getMetrics() {
     const res = await fetchWithTimeout(
       `${API}/metrics`,
       {},
-      5000,
+      45000,
       'Metrics service timed out. Please try again.'
     );
     const data = await res.json();
