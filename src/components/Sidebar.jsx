@@ -8,7 +8,6 @@ import {
   Bot, 
   Settings, 
   HelpCircle,
-  Clock,
   ChevronLeft,
   ChevronRight,
   X
@@ -26,7 +25,6 @@ export default function Sidebar({
     { id: 'home', label: 'Home', icon: Home },
     { id: 'forecast', label: 'Forecast', icon: Sun },
     { id: 'locations', label: 'Locations', icon: MapPin },
-    { id: 'planner', label: 'Air Planner', icon: Clock },
     { id: 'analytics', label: 'Analytics', icon: BarChart2 },
     { id: 'calendar', label: 'Calendar', icon: Calendar },
     { id: 'ai', label: 'Ask Drishti AI', icon: Bot, isAi: true },

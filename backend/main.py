@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import joblib
@@ -37,6 +38,7 @@ class Q(BaseModel):
     question: str
     lat: float = 28.6139
     lon: float = 77.2090
+    history: Optional[list] = None
 
 
 class ClassifyRequest(BaseModel):
@@ -70,7 +72,7 @@ def health():
 
 @app.post("/chat")
 def ask(q: Q):
-    return {"answer": chat(q.question, q.lat, q.lon)}
+    return {"answer": chat(q.question, q.lat, q.lon, history=q.history)}
 
 
 @app.get("/forecast")

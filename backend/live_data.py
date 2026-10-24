@@ -9,6 +9,7 @@ Fetches live data from multiple resilient public sources:
 """
 
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 import json
@@ -149,39 +150,50 @@ def _health_advice(aqi) -> str:
 # DYNAMIC GEOCODING FOR ANY INDIAN CITY OR DISTRICT
 # ---------------------------------------------------------------------------
 
+_GEOCODE_CACHE: dict = {}
+
 def geocode_indian_city(city_name: str) -> dict:
     """Resolve ANY Indian city name to lat, lon, and official state."""
     clean_name = city_name.strip().lower()
 
+    if clean_name in _GEOCODE_CACHE:
+        return _GEOCODE_CACHE[clean_name]
+
     # 1. Check instant local dictionary
     if clean_name in INDIAN_CITIES:
+        _GEOCODE_CACHE[clean_name] = INDIAN_CITIES[clean_name]
         return INDIAN_CITIES[clean_name]
 
     # Partial match check in local dictionary
     for k, v in INDIAN_CITIES.items():
         if k in clean_name or clean_name in k:
+            _GEOCODE_CACHE[clean_name] = v
             return v
 
     # 2. Dynamic geocoding via Open-Meteo Geocoding API (free, worldwide, India-filtered)
     try:
         url = "https://geocoding-api.open-meteo.com/v1/search"
         params = {"name": city_name, "country": "India", "count": 1, "language": "en"}
-        resp = requests.get(url, params=params, timeout=5)
+        resp = requests.get(url, params=params, timeout=3.0)
         if resp.status_code == 200:
             data = resp.json().get("results")
             if data and len(data) > 0:
                 first = data[0]
-                return {
+                res = {
                     "name": first.get("name", city_name.title()),
                     "state": first.get("admin1", "India"),
                     "lat": round(first["latitude"], 4),
                     "lon": round(first["longitude"], 4),
                 }
+                _GEOCODE_CACHE[clean_name] = res
+                return res
     except Exception as e:
         print(f"Geocoding error for {city_name}: {e}")
 
     # Fallback to Delhi default
-    return {"name": city_name.title(), "state": "India", "lat": 28.6139, "lon": 77.2090}
+    fallback = {"name": city_name.title(), "state": "India", "lat": 28.6139, "lon": 77.2090}
+    _GEOCODE_CACHE[clean_name] = fallback
+    return fallback
 
 
 # ---------------------------------------------------------------------------
@@ -319,8 +331,16 @@ def _fetch_waqi_by_city(city: str) -> dict:
 # PUBLIC: get_live_aqi_by_coords
 # ---------------------------------------------------------------------------
 
+_LIVE_AQI_CACHE: dict = {}
+
 def get_live_aqi_by_coords(lat: float, lon: float) -> dict:
     """Fetch live AQI from WAQI → Open-Meteo fallback. Always returns accurate, rich data."""
+    cache_key = (round(lat, 2), round(lon, 2))
+    now_ts = time.time()
+    if cache_key in _LIVE_AQI_CACHE and (now_ts - _LIVE_AQI_CACHE[cache_key]["ts"]) < 300:
+        return _LIVE_AQI_CACHE[cache_key]["data"]
+
+    res = None
     # 1. Try WAQI first
     res = _fetch_waqi_by_coords(lat, lon)
     if res and res.get("aqi"):
@@ -328,6 +348,7 @@ def get_live_aqi_by_coords(lat: float, lon: float) -> dict:
         res["category"] = _aqi_category(aqi)
         res["health_advice"] = _health_advice(aqi)
         res["fetched_at"] = _now_ist()
+        _LIVE_AQI_CACHE[cache_key] = {"ts": now_ts, "data": res}
         return res
 
     # 2. Try Open-Meteo
@@ -337,9 +358,10 @@ def get_live_aqi_by_coords(lat: float, lon: float) -> dict:
         res["category"] = _aqi_category(aqi)
         res["health_advice"] = _health_advice(aqi)
         res["fetched_at"] = _now_ist()
+        _LIVE_AQI_CACHE[cache_key] = {"ts": now_ts, "data": res}
         return res
 
-    return {
+    fallback = {
         "aqi": 140,
         "category": "Moderate",
         "dominant_pollutant": "PM2.5",
@@ -349,6 +371,8 @@ def get_live_aqi_by_coords(lat: float, lon: float) -> dict:
         "source": "Estimated Indian regional model",
         "fetched_at": _now_ist(),
     }
+    _LIVE_AQI_CACHE[cache_key] = {"ts": now_ts, "data": fallback}
+    return fallback
 
 
 # ---------------------------------------------------------------------------
@@ -396,8 +420,15 @@ def get_live_aqi_by_city(city: str) -> dict:
 # PUBLIC: get_weather_context
 # ---------------------------------------------------------------------------
 
+_LIVE_WEATHER_CACHE: dict = {}
+
 def get_weather_context(lat: float, lon: float, city_name: str = "") -> dict:
     """Fetch current real-time weather from Open-Meteo with detailed meteorological AQI impact."""
+    cache_key = (round(lat, 2), round(lon, 2))
+    now_ts = time.time()
+    if cache_key in _LIVE_WEATHER_CACHE and (now_ts - _LIVE_WEATHER_CACHE[cache_key]["ts"]) < 300:
+        return _LIVE_WEATHER_CACHE[cache_key]["data"]
+
     try:
         url = "https://api.open-meteo.com/v1/forecast"
         params = {
@@ -406,7 +437,7 @@ def get_weather_context(lat: float, lon: float, city_name: str = "") -> dict:
             "current": "temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,precipitation,weather_code,apparent_temperature,surface_pressure",
             "timezone": "Asia/Kolkata",
         }
-        r = requests.get(url, params=params, timeout=6)
+        r = requests.get(url, params=params, timeout=3.0)
         if r.status_code != 200:
             return {"error": f"Weather API HTTP {r.status_code}"}
         data = r.json().get("current", {})
@@ -462,7 +493,7 @@ def get_weather_context(lat: float, lon: float, city_name: str = "") -> dict:
             aqi_impact.append("Fog layer mixed with particulate emissions is forming smog, sharply reducing visibility and air quality.")
             pollution_risk = "high"
 
-        return {
+        res = {
             "city": city_name or f"Grid ({lat:.2f}°N, {lon:.2f}°E)",
             "temperature_c": temp,
             "feels_like_c": feels_like,
@@ -477,6 +508,8 @@ def get_weather_context(lat: float, lon: float, city_name: str = "") -> dict:
             "aqi_impact_notes": aqi_impact if aqi_impact else ["Neutral meteorological conditions — normal pollutant dispersion."],
             "fetched_at": _now_ist(),
         }
+        _LIVE_WEATHER_CACHE[cache_key] = {"ts": now_ts, "data": res}
+        return res
     except Exception as e:
         return {"error": str(e), "fetched_at": _now_ist()}
 

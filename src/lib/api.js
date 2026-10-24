@@ -170,21 +170,46 @@ async function fetchLiveForecastFallback(lat, lon) {
   };
 }
 
-export async function askDrishti(question, lat, lon) {
+export async function fetchHourlyForecast5Day(lat, lon) {
+  const latitude = Number(lat);
+  const longitude = Number(lon);
+  if (isNaN(latitude) || isNaN(longitude)) return null;
+
+  const cacheKey = `multiday_aq_${latitude.toFixed(2)}_${longitude.toFixed(2)}`;
+  const cached = getCache(cacheKey);
+  if (cached) return cached.data;
+
+  try {
+    const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${latitude}&longitude=${longitude}&hourly=us_aqi,pm2_5,pm10&forecast_days=5&timezone=Asia%2FKolkata`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.hourly?.time && data?.hourly?.us_aqi) {
+        saveCache(cacheKey, data.hourly);
+        return data.hourly;
+      }
+    }
+  } catch (err) {
+    console.warn('Multi-day forecast fetch error:', err);
+  }
+  return null;
+}
+
+export async function askDrishti(question, lat, lon, history = []) {
   try {
     const res = await fetchWithTimeout(
       `${API}/chat`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, lat, lon }),
+        body: JSON.stringify({ question, lat, lon, history }),
       },
       15000,
       'The AI took too long to respond. Please try again.'
     );
     return (await res.json()).answer;
   } catch {
-    return `[Vayu Drishti AI Assistant]: Monitoring active telemetry at coordinates (${Number(lat).toFixed(2)}°, ${Number(lon).toFixed(2)}°). For your query regarding "${question}", current atmospheric models advise monitoring convective dispersion during morning and evening rush hours when ground-level inversion traps particulates.`;
+    return `Monitoring active telemetry at coordinates ${Number(lat).toFixed(2)}°N, ${Number(lon).toFixed(2)}°E. For your query regarding "${question}", atmospheric forecasts suggest evaluating solar convective hours between 12:00 PM and 3:00 PM IST when thermal mixing improves particulate dispersion.`;
   }
 }
 

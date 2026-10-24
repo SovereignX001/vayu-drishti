@@ -4,7 +4,6 @@ import TopNav from './components/TopNav';
 import BreatheEasyHero from './components/BreatheEasyHero';
 import InteractiveMap from './components/InteractiveMap';
 import AIAssistantView from './components/AIAssistantView';
-import PlannerView from './components/PlannerView';
 import CalendarView from './components/CalendarView';
 import ForecastView from './components/ForecastView';
 import SettingsView from './components/SettingsView';
@@ -215,16 +214,7 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 3: AIR PLANNER (10-HOUR OUTING PROJECTIONS) */}
-          {activeTab === 'planner' && (
-            <PlannerView 
-              onTriggerAlert={handleTriggerAlert}
-              toast={toast}
-              setToast={setToast}
-            />
-          )}
-
-          {/* TAB 4: DRISHTI AI ASSISTANT (PERSONALIZED OUTING & TRAVEL TIPS) */}
+          {/* DRISHTI AI ASSISTANT (PERSONALIZED OUTING & TRAVEL TIPS) */}
           {activeTab === 'ai' && (
             <AIAssistantView 
               onTriggerAlert={handleTriggerAlert}
@@ -249,6 +239,8 @@ export default function App() {
             <CalendarView 
               onTriggerAlert={handleTriggerAlert} 
               alertState={alertState} 
+              currentLocation={currentLocation}
+              selectedCity={selectedCity}
             />
           )}
 

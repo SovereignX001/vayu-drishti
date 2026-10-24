@@ -2,10 +2,12 @@ import concurrent.futures
 import json
 import os
 import re
+from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
 from dotenv import load_dotenv
 
-AI_TIMEOUT_SECONDS = 8.0
+AI_TIMEOUT_SECONDS = 5.5
 
 load_dotenv(override=True)
 
@@ -20,38 +22,44 @@ from live_data import (
     geocode_indian_city,
     INDIAN_CITIES,
 )
+from planner import plan_activity, ACTIVITY_PROFILES
 
 # ---------------------------------------------------------------------------
-# SYSTEM PROMPT — Comprehensive Indian Atmospheric Intelligence Expert
+# SYSTEM PROMPT — Single AQI Scale (US Scale), Strict Answer Structure
 # ---------------------------------------------------------------------------
-SYSTEM = """You are Drishti, an advanced atmospheric intelligence assistant built specifically for Indian cities, combining live weather and air quality web telemetry with machine-learned historical insights (trained on 235,785 CPCB monitoring records across 291 Indian cities from 2023–2025).
+SYSTEM = """You are Drishti, an advanced air quality and atmospheric intelligence assistant for Indian cities.
+You provide precise, honest, data-backed guidance on air quality and whether or when it is safe to conduct outdoor activities.
 
-## CORE INSTRUCTIONS:
-- Give VARIED, natural, conversational, and deeply insightful answers. Never use repetitive templates.
-- Tailor the answer specifically to the user's question:
-  * Simple questions: 2–3 concise, punchy sentences.
-  * In-depth questions (trends, health, meteorological drivers, pollutants): 4–8 informative sentences with specific numbers and context.
-- Always quote the ACTUAL AQI number, pollutant concentrations (µg/m³), and official Indian AQI category (Good [0-50], Satisfactory [51-100], Moderate [101-200], Poor [201-300], Very Poor [301-400], Severe [401-500]).
-- Incorporate live weather parameters: temperature (°C), relative humidity (%), wind speed (km/h), and precipitation, explaining their direct meteorological impact on pollutant dispersion or accumulation.
-- Reference historical benchmarks from the trained Kaggle 2023-2025 dataset when discussing city trends or comparing whether current air is cleaner or dirtier than average.
-- For health queries, give practical, actionable advice: N95/FFP2 masks (surgical masks don't filter PM2.5), HEPA air purifiers, and specific precautions for asthmatics, children, and the elderly.
-- When any Indian city is mentioned, always fetch live data for that city.
+AQI SCALE:
+- The platform operates on the US AQI scale (US EPA standard from Open-Meteo).
+- Always refer to air quality as "AQI [value] (US scale)" the first time you mention it.
+- Use only standard US AQI categories: Good (0-50), Moderate (51-100), Unhealthy for Sensitive Groups (101-150), Unhealthy (151-200), Very Unhealthy (201-300), Hazardous (301-500). Never mix Indian NAQI category names.
 
-## METEOROLOGICAL IMPACT GUIDE:
-- **Wind Speed**: <5 km/h causes severe stagnation and ground accumulation; >15 km/h actively disperses pollutants.
-- **Humidity**: >75-80% causes hygroscopic swelling of PM2.5 particles, worsening optical haze; <30% allows road/construction dust to stay airborne as PM10.
-- **Temperature Inversion**: Cold winter nights (<14°C) create shallow inversion boundaries that trap vehicular emissions close to the ground.
-- **Rain (Wet Scavenging)**: Precipitation washes fine particulate matter out of the air column.
+ACTIVITY & OUTDOOR TIMING QUESTIONS:
+When asked WHEN, WHETHER, or IF it is safe to do any outdoor activity (running, cycling, walking, picnic, sports, kids playing, opening windows, yoga, commute), ALWAYS call the plan_activity tool.
 
-Be empathetic, scientifically rigorous, articulate, and varied in your expression.
+STRICT ANSWER STRUCTURE FOR ACTIVITY QUESTIONS:
+Every activity answer MUST follow this exact 5-part order in short plain paragraphs (4 to 7 sentences total):
+1) Verdict in one sentence: State clearly whether to go now, wait until a specific time, not go today, or that no clean window exists in the forecast.
+2) Why with 2-3 real numbers: Quote the current AQI with "(US scale)" named once, dominant pollutant (e.g. PM2.5), wind speed in km/h, and temperature or humidity.
+3) When with exact windows: Quote the primary window and one backup with weekday, date and local time (e.g., "Tomorrow, Sun 25 Oct, 2:00-3:00 PM IST, AQI about 78"). Quote only times returned by tools.
+4) If no safe window exists: State this plainly, give the least-bad window with its AQI, provide an indoor or mask alternative, and state what atmospheric change (wind or rain from the forecast) would be needed to improve conditions.
+5) Caveat: Add a brief sentence only when relevant that forecast accuracy drops beyond 24 hours and numbers represent regional airshed models rather than a sensor at their specific doorstep.
+
+STYLE & FORMATTING RULES:
+- NO MARKDOWN: Never use asterisks (**), headers (#), or bullet points (•, -). Use natural flowing paragraphs.
+- Never reuse the same opening sentence across replies; vary phrasing.
+- Do not diagnose illnesses or give medical dosage recommendations.
+- Adapt to user parameters (asthma, age, children, commute mode, distance).
+- If the question is ambiguous, answer for the most likely case and invite a follow-up in one short line.
 """
 
 # ---------------------------------------------------------------------------
-# HISTORICAL BENCHMARKS (from trained Kaggle dataset)
+# HISTORICAL BENCHMARKS (from trained dataset)
 # ---------------------------------------------------------------------------
 
 def get_historical_benchmarks(city: str) -> dict:
-    """Retrieve 2023-2025 historical AQI benchmarks from the trained Kaggle dataset."""
+    """Retrieve historical AQI benchmarks from the national statistics dataset."""
     stats_file = Path(__file__).resolve().parent / "data" / "national_aqi_stats.json"
     if not stats_file.exists():
         return {"city": city, "note": "Historical benchmark dataset not yet compiled."}
@@ -60,13 +68,11 @@ def get_historical_benchmarks(city: str) -> dict:
             data = json.load(f)
         benchmarks = data.get("city_benchmarks", {})
 
-        # Search matching city
         c_lower = city.lower().strip()
         for c_key, c_val in benchmarks.items():
             if c_key.lower() == c_lower or c_key.lower() in c_lower or c_lower in c_key.lower():
                 return c_val
 
-        # If not found directly, try state search
         state_benchmarks = data.get("state_benchmarks", {})
         for s_key, s_val in state_benchmarks.items():
             if s_key.lower() in c_lower or c_lower in s_key.lower():
@@ -90,8 +96,33 @@ GROQ_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "plan_activity",
+            "description": "Determine safe time windows for any outdoor activity (running, cycling, walking, kids playing, opening windows, yoga, sports, commute) across a 1 to 5 day forecast. Always call this tool when the user asks WHEN, WHETHER, or IF it is safe to do something outdoors.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "activity": {
+                        "type": "string",
+                        "description": "Activity name: running, cycling, outdoor_workout, kids_play, outdoor_walk, commute, open_windows, outdoor_yoga.",
+                    },
+                    "duration_min": {
+                        "type": "integer",
+                        "description": "Expected duration in minutes (e.g. 30, 45, 60, 120). Default 60.",
+                    },
+                    "sensitive": {
+                        "type": "boolean",
+                        "description": "True if user mentions asthma, breathing issues, elderly, child, kid, baby, heart condition, or pregnancy.",
+                    },
+                },
+                "required": ["activity"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_indian_city_overview",
-            "description": "Fetch real-time live AQI, live weather, weather impact analysis, and trained historical Kaggle benchmarks for ANY Indian city.",
+            "description": "Fetch real-time live AQI, live weather, weather impact analysis, and historical benchmarks for ANY Indian city.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -117,23 +148,6 @@ GROQ_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "check_activity",
-            "description": "Check if outdoor activity is safe right now and find the best window in the next 24 hours.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "activity": {"type": "string", "enum": ["run", "walk", "cycling", "kids_play", "open_windows", "picnic"]},
-                    "after_hour": {"type": "integer", "description": "Earliest hour (0-23)."},
-                    "before_hour": {"type": "integer", "description": "Latest hour (0-23)."},
-                    "sensitive": {"type": "boolean", "description": "True if elderly, child, or respiratory condition."},
-                },
-                "required": ["activity"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "get_forecast",
             "description": "Get current AQI and 24-hour hyper-local forecast summary.",
             "parameters": {"type": "object", "properties": {}},
@@ -151,7 +165,7 @@ GROQ_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_historical_benchmarks",
-            "description": "Retrieve 2023-2025 historical AQI benchmark stats for an Indian city from the trained Kaggle dataset.",
+            "description": "Retrieve historical AQI benchmark stats for an Indian city.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -164,7 +178,15 @@ GROQ_TOOLS = [
 ]
 
 
-def run_tool(name, args, lat, lon):
+def run_tool(name: str, args: dict, lat: float, lon: float) -> dict:
+    if name == "plan_activity":
+        return plan_activity(
+            activity=args.get("activity", "outdoor_walk"),
+            lat=lat,
+            lon=lon,
+            duration_min=args.get("duration_min", 60),
+            sensitive=args.get("sensitive", False),
+        )
     if name == "get_indian_city_overview":
         return get_indian_city_live_intelligence(args.get("city", "Delhi"))
     if name == "get_city_aqi":
@@ -197,7 +219,84 @@ def run_tool(name, args, lat, lon):
 
 
 # ---------------------------------------------------------------------------
-# INTELLIGENT LOCAL SYNTHESIS ENGINE (High-variety RAG & Live Web Grounder)
+# POST-GENERATION TIME GUARD
+# ---------------------------------------------------------------------------
+
+def _extract_clock_times_normalized(text: str) -> Set[str]:
+    """Extract clock times from text normalized to 24h HH:MM and 12h formats."""
+    result = set()
+    # Match HH:MM or H:MM with optional AM/PM
+    for m in re.finditer(r"\b(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?\b", text):
+        h = int(m.group(1))
+        minute = int(m.group(2))
+        ampm = m.group(3)
+        if ampm:
+            if ampm.upper() == "PM" and h < 12:
+                h += 12
+            elif ampm.upper() == "AM" and h == 12:
+                h = 0
+        if 0 <= h <= 23 and 0 <= minute <= 59:
+            result.add(f"{h:02d}:{minute:02d}")
+            h12 = h % 12 or 12
+            ap = "AM" if h < 12 else "PM"
+            result.add(f"{h12}:{minute:02d} {ap}")
+            result.add(f"{h12} {ap}")
+
+    # Match H AM / H PM without minutes
+    for m in re.finditer(r"\b(\d{1,2})\s*(AM|PM|am|pm)\b", text):
+        h = int(m.group(1))
+        ampm = m.group(2).upper()
+        if 1 <= h <= 12:
+            h24 = h
+            if ampm == "PM" and h < 12:
+                h24 += 12
+            elif ampm == "AM" and h == 12:
+                h24 = 0
+            result.add(f"{h24:02d}:00")
+            result.add(f"{h} {ampm}")
+            result.add(f"{h}:00 {ampm}")
+
+    return result
+
+
+def _verify_and_clean_answer(
+    answer: str,
+    planner_result: Optional[dict],
+    user_query: str,
+) -> str:
+    """
+    Guard: ensures model answers only quote clock times from tools or query.
+    Removes stray markdown formatting (*, #, bullets).
+    """
+    if not answer:
+        return planner_result.get("formatted_summary", "") if planner_result else ""
+
+    # Clean markdown
+    cleaned = re.sub(r"\*+", "", answer)
+    cleaned = re.sub(r"^[•\-\*#]+\s*", "", cleaned, flags=re.MULTILINE)
+    cleaned = cleaned.strip()
+
+    if not planner_result:
+        return cleaned
+
+    # Gather all allowed clock times from tool output and query
+    tool_text = json.dumps(planner_result)
+    allowed_times = _extract_clock_times_normalized(tool_text) | _extract_clock_times_normalized(user_query)
+
+    # Extract times from generated answer
+    answer_times = _extract_clock_times_normalized(cleaned)
+
+    # If answer contains clock times that were completely absent from tool output & query:
+    hallucinated = [t for t in answer_times if t not in allowed_times]
+    if hallucinated:
+        # Fall back directly to the deterministic formatted answer
+        return planner_result.get("formatted_summary", cleaned)
+
+    return cleaned
+
+
+# ---------------------------------------------------------------------------
+# INTELLIGENT LOCAL SYNTHESIS ENGINE (Deterministic RAG & Web Grounder)
 # ---------------------------------------------------------------------------
 
 def _detect_mentioned_cities(text: str) -> list:
@@ -212,76 +311,118 @@ def _detect_mentioned_cities(text: str) -> list:
     return found
 
 
-def _classify_intent(q: str) -> str:
-    ql = q.lower()
-    # Comparison
-    if (" vs " in ql or "compare" in ql or "better than" in ql) and len(_detect_mentioned_cities(q)) >= 2:
-        return "comparison"
-    # Specific weather query
-    if any(w in ql for w in ["weather", "temperature", "temp", "humidity", "wind", "rain", "rainy", "hot", "cold"]):
-        return "weather"
-    # Mask & Purifier & Health
-    if any(w in ql for w in ["mask", "purifier", "asthma", "breathe", "lungs", "doctor", "health risk", "safe for kids", "elderly"]):
-        return "health"
-    # Pollutant science
-    if any(w in ql for w in ["pm2.5", "pm10", "pm 2.5", "ozone", "no2", "so2", "pollutant", "smog"]):
-        return "pollutant"
-    # Season / stubble burning / Diwali
-    if any(w in ql for w in ["stubble", "parali", "diwali", "winter", "monsoon", "summer", "season", "crop"]):
-        return "seasonality"
-    # Outdoor Activity
-    if any(w in ql for w in ["run", "jog", "walk", "cycl", "bike", "outside", "outdoor", "play", "window", "picnic", "cricket"]):
-        return "activity"
-    # City overview or AQI
-    if any(w in ql for w in ["aqi", "air quality", "pollution", "how is"]) or _detect_mentioned_cities(q):
-        return "city_overview"
-    # Greeting / General
-    if any(w in ql for w in ["hi", "hello", "hey", "who are you", "what can you do", "namaste"]):
-        return "greeting"
-    return "general"
+def _infer_activity_context(question: str, history: Optional[list]) -> Tuple[str, int, bool]:
+    """Detect activity, duration, and sensitive flag from question and recent history."""
+    combined = question
+    if history:
+        recent_text = " ".join(turn.get("text", "") for turn in history[-4:])
+        combined = f"{recent_text} {question}"
+
+    cl = combined.lower()
+    ql = question.lower()
+
+    # Sensitivity
+    sensitive = any(w in cl for w in ["asthma", "child", "kid", "baby", "elderly", "pregnant", "heart", "breath", "lung"])
+
+    # Duration
+    duration = 60
+    dur_match = re.search(r"\b(\d+)\s*(?:min|minute|hour|hr)\b", cl)
+    if "5km" in cl or "5k" in cl or "30 min" in cl:
+        duration = 30
+    elif "10km" in cl or "10k" in cl:
+        duration = 60
+    elif dur_match:
+        val = int(dur_match.group(1))
+        if "hour" in cl or "hr" in cl:
+            val *= 60
+        duration = max(15, min(300, val))
+
+    # Activity matching
+    if any(w in ql for w in ["run", "jog", "5k", "sprint"]):
+        return ("running", duration, sensitive)
+    if any(w in ql for w in ["cycl", "bike"]):
+        return ("cycling", duration, sensitive)
+    if any(w in ql for w in ["play", "kid", "child"]):
+        return ("kids_play", duration, sensitive)
+    if any(w in ql for w in ["window", "ventil"]):
+        return ("open_windows", duration, sensitive)
+    if any(w in ql for w in ["yoga", "pranayam"]):
+        return ("outdoor_yoga", duration, sensitive)
+    if any(w in ql for w in ["workout", "sports", "cricket"]):
+        return ("outdoor_workout", duration, sensitive)
+    if any(w in ql for w in ["commute", "travel", "office"]):
+        return ("commute", duration, sensitive)
+    if any(w in ql for w in ["walk", "picnic", "stroll"]):
+        return ("outdoor_walk", duration, sensitive)
+
+    # If question is a follow up ("what about tomorrow?") use history
+    if any(w in ql for w in ["tomorrow", "what about", "how about", "later", "this week"]):
+        if any(w in cl for w in ["run", "jog"]):
+            return ("running", duration, sensitive)
+        if any(w in cl for w in ["cycl", "bike"]):
+            return ("cycling", duration, sensitive)
+        if any(w in cl for w in ["kid", "child", "play"]):
+            return ("kids_play", duration, sensitive)
+        if any(w in cl for w in ["window", "ventil"]):
+            return ("open_windows", duration, sensitive)
+        if any(w in cl for w in ["walk", "picnic"]):
+            return ("outdoor_walk", duration, sensitive)
+
+    return ("outdoor_walk", duration, sensitive)
 
 
-def fallback_answer(question: str, lat: float, lon: float) -> str:
+def _is_activity_query(question: str, history: Optional[list] = None) -> bool:
+    """Check if query is asking whether or when to conduct an outdoor activity."""
+    ql = question.lower()
+    activity_words = [
+        "run", "jog", "5km", "10km", "cycl", "bike", "walk", "picnic", "play", "kid", "child",
+        "window", "ventil", "yoga", "workout", "sports", "cricket", "commute", "outside",
+        "when can i", "is it safe", "best time", "best day", "can i", "should i"
+    ]
+    if any(w in ql for w in activity_words):
+        return True
+
+    # If question is a temporal follow-up ("what about tomorrow?"), check history for prior activity
+    if history and any(w in ql for w in ["tomorrow", "what about", "how about", "later", "this week", "next day"]):
+        hist_text = " ".join([str(h.get("text", "")).lower() for h in history[-4:]])
+        if any(w in hist_text for w in ["run", "jog", "cycl", "bike", "walk", "picnic", "play", "kid", "child", "window", "yoga", "workout", "sports"]):
+            return True
+
+    return False
+
+
+def fallback_answer(question: str, lat: float, lon: float, history: Optional[list] = None) -> str:
     """
     Intelligent Local Atmospheric Synthesis Engine.
-    Executes live data fetching from public web APIs (Open-Meteo & WAQI),
-    cross-references the 235k+ record Kaggle trained dataset, and delivers rich, varied answers.
+    Executes live data fetching from public web APIs, adheres to the US AQI scale,
+    and formats answers without markdown asterisks or bullet lists.
     """
-    intent = _classify_intent(question)
-    cities = _detect_mentioned_cities(question)
+    ql = question.lower()
 
-    # 1. Comparison Intent (e.g., Delhi vs Mumbai)
-    if intent == "comparison" and len(cities) >= 2:
-        c1, c2 = cities[0], cities[1]
-        d1 = get_indian_city_live_intelligence(c1)
-        d2 = get_indian_city_live_intelligence(c2)
-
-        aqi1 = d1["live_aqi"].get("aqi", "N/A")
-        cat1 = d1["live_aqi"].get("category", "")
-        t1 = d1["live_weather"].get("temperature_c", "N/A")
-        w1 = d1["live_weather"].get("wind_kmh", "N/A")
-        hist1 = d1["historical_benchmark"].get("avg_aqi", "N/A")
-
-        aqi2 = d2["live_aqi"].get("aqi", "N/A")
-        cat2 = d2["live_aqi"].get("category", "")
-        t2 = d2["live_weather"].get("temperature_c", "N/A")
-        w2 = d2["live_weather"].get("wind_kmh", "N/A")
-        hist2 = d2["historical_benchmark"].get("avg_aqi", "N/A")
-
-        cleaner = c1 if (isinstance(aqi1, (int, float)) and isinstance(aqi2, (int, float)) and aqi1 < aqi2) else c2
-
+    # 1. Nonsense or Incomprehensible query guard first
+    if len(ql.strip()) < 3 or not re.search(r"[a-z]{3,}", ql) or (all(c in "asdfghjklqwertyuiopzxcvbnm1234567890" for c in ql.strip()[:6]) and len(ql.split()) <= 1 and not any(w in ql for w in ["run", "jog", "walk", "cycl", "bike"])):
         return (
-            f"**{c1} vs {c2} Live Air & Weather Comparison:**\n\n"
-            f"• **{c1}**: Currently at **AQI {aqi1} ({cat1})** with temperature {t1}°C and wind speed of {w1} km/h. "
-            f"According to our trained 2023–2025 CPCB dataset, its historical average AQI is {hist1}.\n"
-            f"• **{c2}**: Currently at **AQI {aqi2} ({cat2})** with temperature {t2}°C and wind speed of {w2} km/h. "
-            f"Its historical 2-year average AQI is {hist2}.\n\n"
-            f"Right now, **{cleaner}** enjoys significantly cleaner atmospheric ventilation. "
-            f"Wind speed and regional topography play a major role in these variations."
+            "I am Drishti, your personal air quality and atmospheric intelligence companion. "
+            "I could not understand that request, but I can help you plan outdoor runs, walks, cycling, or provide live air quality and weather forecasts across Indian cities. "
+            "Please feel free to ask about your neighborhood or a specific activity."
         )
 
-    # Determine primary target city or use current coordinates
+    # 2. Activity Scheduling Intent
+    if _is_activity_query(question, history):
+        act_name, duration, sensitive = _infer_activity_context(question, history)
+        plan_res = plan_activity(
+            activity=act_name,
+            lat=lat,
+            lon=lon,
+            duration_min=duration,
+            sensitive=sensitive,
+        )
+        return plan_res.get("formatted_summary", "")
+
+    # Non-activity queries: fetch live telemetry
+    cities = _detect_mentioned_cities(question)
     target_city = cities[0] if cities else None
+
     if target_city:
         intel = get_indian_city_live_intelligence(target_city)
         cur_aqi = intel["live_aqi"].get("aqi", 130)
@@ -289,7 +430,6 @@ def fallback_answer(question: str, lat: float, lon: float) -> str:
         pm25 = intel["live_aqi"].get("pollutants", {}).get("PM2.5", 45)
         pm10 = intel["live_aqi"].get("pollutants", {}).get("PM10", 90)
         weather = intel["live_weather"]
-        hist = intel["historical_benchmark"]
         loc_name = intel["city"]
         state_name = intel["state"]
     else:
@@ -299,222 +439,160 @@ def fallback_answer(question: str, lat: float, lon: float) -> str:
         cur_cat = aqi_res.get("category", "Moderate")
         pm25 = aqi_res.get("pollutants", {}).get("PM2.5", 45)
         pm10 = aqi_res.get("pollutants", {}).get("PM10", 90)
-        hist = get_historical_benchmarks("Delhi")
         loc_name = aqi_res.get("station", "your local area")
         state_name = "India"
 
     temp = weather.get("temperature_c", 25)
-    feels = weather.get("feels_like_c", temp)
     humidity = weather.get("humidity_pct", 55)
     wind = weather.get("wind_kmh", 8)
-    wind_dir = weather.get("wind_direction", "NW")
     condition = weather.get("condition", "Partly cloudy")
     impact_note = weather.get("aqi_impact_notes", ["Normal atmospheric conditions."])[0]
-    season = get_seasonal_context()
 
-    # 2. Weather Intent
-    if intent == "weather":
+    # 3. Weather Query
+    if any(w in ql for w in ["weather", "temperature", "temp", "humidity", "wind", "rain"]):
         return (
-            f"**Live Weather Telemetry for {loc_name} ({state_name}):**\n"
-            f"• **Temperature**: {temp}°C (feels like {feels}°C) | **Conditions**: {condition}\n"
-            f"• **Relative Humidity**: {humidity}% | **Wind**: {wind} km/h from {wind_dir}\n"
-            f"• **Current AQI**: {cur_aqi} ({cur_cat})\n\n"
-            f"**Atmospheric Impact:** {impact_note} "
-            f"When winds remain under 10 km/h, particulate matter struggles to disperse, causing local hotspots."
+            f"Live weather telemetry for {loc_name} ({state_name}) indicates a temperature of {temp}°C with {humidity}% relative humidity and winds at {wind} km/h under {condition.lower()} skies. "
+            f"Air quality currently stands at AQI {cur_aqi} (US scale) with PM2.5 at {pm25} µg/m³. "
+            f"{impact_note} When surface winds remain light, airborne particulates settle close to the breathing zone."
         )
 
-    # 3. City Overview / AQI Query
-    if intent == "city_overview":
-        hist_note = ""
-        if hist and hist.get("avg_aqi"):
-            avg_aqi = hist["avg_aqi"]
-            diff = cur_aqi - avg_aqi if isinstance(cur_aqi, (int, float)) else 0
-            trend_str = "higher than" if diff > 15 else ("lower than" if diff < -15 else "consistent with")
-            hist_note = f" For historical context, our 2023–2025 trained model records a 2-year average AQI of {avg_aqi} for this area, meaning today's air is {trend_str} its historical baseline."
-
-        return (
-            f"In **{loc_name}**, the live air quality is currently **AQI {cur_aqi} ({cur_cat})**.\n\n"
-            f"• **Key Pollutants**: PM2.5 is at {pm25} µg/m³ and PM10 is at {pm10} µg/m³.\n"
-            f"• **Weather Telemetry**: Temperature is {temp}°C, humidity is {humidity}%, and wind is blowing at {wind} km/h ({condition}).\n"
-            f"• **Meteorological Factor**: {impact_note}{hist_note}\n\n"
-            f"**Health Advisory**: {cur_cat} air calls for sensible precautions. Sensitive groups (asthmatics, elderly, children) should avoid prolonged outdoor exertion."
-        )
-
-    # 4. Health, Mask & Purifier Guidance
-    if intent == "health":
-        mask_rec = (
-            "An **N95 or FFP2 certified respirator** is strongly recommended outdoors. "
-            "Standard surgical or cloth masks filter less than 20% of sub-micron PM2.5 particles."
+    # 4. Mask / Health Query
+    if any(w in ql for w in ["mask", "purifier", "asthma", "breathe", "doctor", "health"]):
+        mask_text = (
+            "A certified N95 or FFP2 respirator is strongly advised outdoors, as standard surgical masks do not filter sub-micron particles."
             if cur_aqi > 150
-            else "Standard outdoor exposure is acceptable for healthy individuals, but sensitive groups should keep an N95 handy."
+            else "Standard outdoor exposure is manageable for healthy individuals, though sensitive groups should carry an N95 mask."
         )
         return (
-            f"**Health & Protection Advisory (Current AQI: {cur_aqi} - {cur_cat}):**\n\n"
-            f"1. **Mask Protection**: {mask_rec}\n"
-            f"2. **Indoor Air Management**: In spaces where AQI exceeds 150, a HEPA (High-Efficiency Particulate Air) purifier with CADR suitable for room volume is essential. Keep doors and windows tightly closed during morning inversion hours (6 AM–9 AM).\n"
-            f"3. **Vulnerable Demographics**: People with asthma, COPD, cardiovascular conditions, young children, and senior citizens experience heightened bronchial inflammation at PM2.5 levels above 60 µg/m³.\n"
-            f"4. **Exercise**: Shift strenuous cardio sessions indoors or schedule them between 11 AM and 3 PM when solar heating disperses the boundary layer."
+            f"Health precautions are advised with local air currently at AQI {cur_aqi} (US scale), falling into the {cur_cat.lower()} category. "
+            f"Fine particulates measure {pm25} µg/m³ PM2.5, alongside {temp}°C temperature and {wind} km/h wind speed. "
+            f"{mask_text} "
+            f"Indoors, running a HEPA air purifier on medium speed and keeping windows closed during morning rush hours prevents particulate penetration."
         )
 
-    # 5. Pollutant Science & Breakdown
-    if intent == "pollutant":
-        return (
-            f"**Atmospheric Pollutant Science ({loc_name}):**\n\n"
-            f"• **PM2.5 ({pm25} µg/m³)**: Microscopic combustion particles under 2.5 microns. They bypass upper nasal cilia, penetrating deep into pulmonary alveoli and the bloodstream. Primary Indian sources include vehicular exhaust, biomass/stubble burning, and industrial boilers.\n"
-            f"• **PM10 ({pm10} µg/m³)**: Coarser airborne dust originating from construction activity, unpaved roads, and regional dust storms.\n"
-            f"• **Weather Interaction**: Current humidity of {humidity}% and wind speed of {wind} km/h influence how long these particles stay suspended. High humidity can cause particles to absorb water vapor and swell optically.\n"
-            f"• **CPCB National Standard**: India's 24-hour safe limits are 60 µg/m³ for PM2.5 and 100 µg/m³ for PM10."
-        )
-
-    # 6. Seasonality, Stubble Burning & Diwali
-    if intent == "seasonality":
-        return (
-            f"**Seasonal Atmospheric Intelligence ({season['season']}):**\n\n"
-            f"{season['aqi_outlook']}\n\n"
-            f"• **Dominant Regional Pollutants**: {', '.join(season['dominant_pollutants'])}\n"
-            f"• **Most Affected Regions**: {', '.join(season['states_most_affected'])}\n"
-            f"• **Thermal Dynamics**: Cool winter and post-monsoon nights create temperature inversions where cold ground air is capped by a warmer atmospheric layer, acting like a lid that traps vehicular smoke and stubble fire plumes until midday sun breaks it."
-        )
-
-    # 7. Outdoor Activity & Forecast
-    if intent == "activity":
-        fc = forecast_next_24h(lat, lon)
-        act = guess_activity(question)
-        r = check_activity(fc, act)
-        best_t = r["best_time"][11:16] if r.get("best_time") else "midday"
-        best_aqi = r.get("best_aqi", cur_aqi)
-
-        if r["ok_now"]:
-            return (
-                f"**Activity Assessment ({act.replace('_', ' ').title()}):**\n\n"
-                f"Current AQI is **{cur_aqi} ({cur_cat})**, which is within safe parameters for outdoor {act.replace('_', ' ')}. "
-                f"Weather is {temp}°C with {wind} km/h breeze. {impact_note}"
-            )
-        else:
-            return (
-                f"**Activity Assessment ({act.replace('_', ' ').title()}):**\n\n"
-                f"Conditions are **sub-optimal right now** with AQI standing at **{cur_aqi} ({cur_cat})**. "
-                f"Fine particulate levels ({pm25} µg/m³ PM2.5) increase respiratory strain during exertion.\n\n"
-                f"• **Recommended Window**: A better window opens around **{best_t}** when AQI drops closer to **{best_aqi}**.\n"
-                f"• **Precaution**: If you must go outside now, consider wearing an N95 mask and avoiding heavy endurance pacing."
-            )
-
-    # 8. Greeting / General
+    # 5. Default City Overview / Greeting
     return (
-        f"Namaste! I am Drishti AI, your real-time atmospheric and air quality intelligence companion.\n\n"
-        f"I am connected to live weather and CPCB/Open-Meteo monitoring feeds across **291 Indian cities**, "
-        f"backed by a machine-learning model trained on 235,785 historical data points.\n\n"
-        f"• **Current Location Telemetry**: AQI is **{cur_aqi} ({cur_cat})** at {temp}°C, {humidity}% humidity, and {wind} km/h wind.\n"
-        f"• **You can ask me**: 'What is the AQI in Mumbai or Kolkata?', 'Compare Delhi and Bengaluru', 'Is it safe to run tomorrow?', or 'Why is PM2.5 high this season?'"
+        f"In {loc_name}, air quality currently measures AQI {cur_aqi} (US scale) with {pm25} µg/m³ PM2.5 as the main particulate driver. "
+        f"Weather readings show {temp}°C with {humidity}% relative humidity and a wind speed of {wind} km/h. "
+        f"{impact_note} "
+        f"You can ask me to evaluate safe time windows for running, cycling, walks, or whether to open home windows today."
     )
 
 
 # ---------------------------------------------------------------------------
-# LLM BACKENDS
+# LLM BACKENDS WITH FUNCTION CALLING & POST-GENERATION GUARD
 # ---------------------------------------------------------------------------
 
-def ask_gemini(api_key: str, question: str, lat: float, lon: float) -> str:
-    """Google Gemini with automatic function calling and graceful fallback."""
+def _build_context_header(lat: float, lon: float, history: Optional[list]) -> str:
+    """Format rich real-time context and recent history into the prompt."""
+    now_ist = datetime.now().strftime("%A, %d %b %Y, %I:%M %p IST")
+    aqi_data = get_live_aqi_by_coords(lat, lon)
+    wx_data = get_weather_context(lat, lon)
+
+    context = (
+        f"### REAL-TIME CONTEXT:\n"
+        f"- Local Timestamp: {now_ist}\n"
+        f"- Location Coordinates: {lat:.4f}°N, {lon:.4f}°E ({aqi_data.get('station', 'Local Area')})\n"
+        f"- Live Air Quality: AQI {aqi_data.get('aqi', 120)} (US scale), Dominant Pollutant PM2.5 ({aqi_data.get('pollutants', {}).get('PM2.5', 40)} µg/m³)\n"
+        f"- Live Weather: {wx_data.get('temperature_c', 25)}°C, Humidity {wx_data.get('humidity_pct', 55)}%, Wind {wx_data.get('wind_kmh', 8)} km/h\n"
+    )
+
+    if history:
+        context += "- Recent Conversation History (Last 6 turns):\n"
+        for h in history[-6:]:
+            sender = h.get("sender", "user")
+            text = h.get("text", "")
+            context += f"  * {sender}: {text}\n"
+
+    return context
+
+
+def ask_gemini(api_key: str, question: str, lat: float, lon: float, history: Optional[list] = None) -> str:
+    """Google Gemini with plan_activity function calling and hallucination guard."""
     from google import genai
     from google.genai import types
 
     client = genai.Client(api_key=api_key)
+    planner_payload = {}
 
-    # Define tools with explicit docstrings for Gemini
-    def get_indian_city_overview(city: str) -> str:
-        """Fetch live AQI, live weather, impact analysis, and historical benchmarks for ANY Indian city."""
-        res = run_tool("get_indian_city_overview", {"city": city}, lat, lon)
+    def plan_activity_tool(activity: str, duration_min: int = 60, sensitive: bool = False) -> str:
+        """Determine safe time windows for outdoor activities (running, cycling, walking, kids play, windows, yoga, sports) across a 1-5 day forecast."""
+        res = run_tool("plan_activity", {"activity": activity, "duration_min": duration_min, "sensitive": sensitive}, lat, lon)
+        planner_payload["result"] = res
         return json.dumps(res)
+
+    def get_indian_city_overview(city: str) -> str:
+        """Fetch live AQI, weather, and benchmarks for ANY Indian city."""
+        return json.dumps(run_tool("get_indian_city_overview", {"city": city}, lat, lon))
 
     def get_weather(city: str = "") -> str:
-        """Get current weather conditions (temperature, humidity, wind, rain) and AQI impact."""
-        res = run_tool("get_weather", {"city": city}, lat, lon)
-        return json.dumps(res)
-
-    def check_activity_tool(activity: str, sensitive: bool = False) -> str:
-        """Check if an outdoor activity is safe right now based on AQI forecast."""
-        res = run_tool("check_activity", {"activity": activity, "sensitive": sensitive}, lat, lon)
-        return json.dumps(res)
+        """Get current weather conditions and air dispersion impact."""
+        return json.dumps(run_tool("get_weather", {"city": city}, lat, lon))
 
     def get_forecast() -> str:
         """Get current AQI and 24-hour forecast summary."""
-        res = run_tool("get_forecast", {}, lat, lon)
-        return json.dumps(res)
+        return json.dumps(run_tool("get_forecast", {}, lat, lon))
 
     def get_season_context() -> str:
-        """Get current Indian season AQI dynamics (winter smog, stubble burning, summer dust, monsoon)."""
-        res = run_tool("get_season_context", {}, lat, lon)
-        return json.dumps(res)
-
-    def get_historical_benchmarks_tool(city: str) -> str:
-        """Retrieve 2023-2025 historical AQI benchmark stats for an Indian city."""
-        res = run_tool("get_historical_benchmarks", {"city": city}, lat, lon)
-        return json.dumps(res)
+        """Get Indian seasonal AQI dynamics."""
+        return json.dumps(run_tool("get_season_context", {}, lat, lon))
 
     config = types.GenerateContentConfig(
-        tools=[get_indian_city_overview, get_weather, check_activity_tool, get_forecast, get_season_context, get_historical_benchmarks_tool],
+        tools=[plan_activity_tool, get_indian_city_overview, get_weather, get_forecast, get_season_context],
         system_instruction=SYSTEM,
-        temperature=0.4,
+        temperature=0.3,
     )
 
-    # Verified working Gemini models in order of speed and capability
+    context_header = _build_context_header(lat, lon, history)
+    augmented_prompt = f"{context_header}\nUser Query: {question}"
+
     candidate_models = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"]
 
     for model_name in candidate_models:
         try:
             chat_session = client.chats.create(model=model_name, config=config)
-            resp = chat_session.send_message(question)
+            resp = chat_session.send_message(augmented_prompt)
             if resp.text and len(resp.text.strip()) > 10:
-                return resp.text.strip()
-        except Exception as e:
-            print(f"Gemini {model_name} attempt note: {e}")
-            continue
-
-    # Direct completion fallback with injected live context if function calling hits a limit
-    for model_name in candidate_models:
-        try:
-            # Pre-fetch live context for user coordinates
-            live_aqi = get_live_aqi_by_coords(lat, lon)
-            live_weather = get_weather_context(lat, lon)
-            prompt = (
-                f"{SYSTEM}\n\n"
-                f"### CURRENT LIVE TELEMETRY:\n"
-                f"- AQI: {live_aqi.get('aqi')} ({live_aqi.get('category')})\n"
-                f"- Weather: {live_weather.get('temperature_c')}°C, Humidity {live_weather.get('humidity_pct')}%, Wind {live_weather.get('wind_kmh')} km/h\n"
-                f"- User Question: {question}\n\n"
-                f"Provide a natural, rich, expert response grounded in this data."
-            )
-            direct_resp = client.models.generate_content(model=model_name, contents=prompt)
-            if direct_resp.text and len(direct_resp.text.strip()) > 10:
-                return direct_resp.text.strip()
+                return _verify_and_clean_answer(resp.text.strip(), planner_payload.get("result"), question)
         except Exception:
             continue
 
-    return fallback_answer(question, lat, lon)
+    return fallback_answer(question, lat, lon, history)
 
 
-def ask_groq(api_key: str, question: str, lat: float, lon: float) -> str:
-    """Groq Cloud — Llama 3.3 70B."""
+def ask_groq(api_key: str, question: str, lat: float, lon: float, history: Optional[list] = None) -> str:
+    """Groq Cloud — Llama 3.3 70B with function calling and hallucination guard."""
     from groq import Groq
 
     client = Groq(api_key=api_key)
+    planner_payload = {}
+
+    context_header = _build_context_header(lat, lon, history)
+
     messages = [
-        {"role": "system", "content": SYSTEM},
-        {"role": "user", "content": question},
+        {"role": "system", "content": f"{SYSTEM}\n\n{context_header}"},
     ]
 
-    for _ in range(6):
+    # Add historical turns if present
+    if history:
+        for turn in history[-4:]:
+            role = "assistant" if turn.get("sender") == "ai" else "user"
+            messages.append({"role": role, "content": turn.get("text", "")})
+
+    messages.append({"role": "user", "content": question})
+
+    for _ in range(5):
         resp = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=messages,
             tools=GROQ_TOOLS,
             tool_choice="auto",
-            max_tokens=900,
-            temperature=0.4,
+            max_tokens=700,
+            temperature=0.3,
         )
         msg = resp.choices[0].message
         if not msg.tool_calls:
-            return msg.content or ""
+            return _verify_and_clean_answer(msg.content or "", planner_payload.get("result"), question)
 
         messages.append(msg)
         for tc in msg.tool_calls:
@@ -524,28 +602,29 @@ def ask_groq(api_key: str, question: str, lat: float, lon: float) -> str:
                 else (tc.function.arguments or {})
             )
             result = run_tool(tc.function.name, args, lat, lon)
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "name": tc.function.name,
-                    "content": json.dumps(result),
-                }
-            )
+            if tc.function.name == "plan_activity":
+                planner_payload["result"] = result
 
-    return fallback_answer(question, lat, lon)
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "name": tc.function.name,
+                "content": json.dumps(result),
+            })
+
+    return fallback_answer(question, lat, lon, history)
 
 
 # ---------------------------------------------------------------------------
 # MAIN CHAT ENTRYPOINT
 # ---------------------------------------------------------------------------
 
-def _try_llm_call(question: str, lat: float, lon: float) -> str:
+def _try_llm_call(question: str, lat: float, lon: float, history: Optional[list] = None) -> str:
     # 1. Try Google Gemini
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
     if gemini_key:
         try:
-            return ask_gemini(gemini_key, question, lat, lon)
+            return ask_gemini(gemini_key, question, lat, lon, history)
         except Exception as e:
             print("Gemini routing error:", e)
 
@@ -553,14 +632,14 @@ def _try_llm_call(question: str, lat: float, lon: float) -> str:
     groq_key = os.getenv("GROQ_API_KEY", "").strip()
     if groq_key:
         try:
-            return ask_groq(groq_key, question, lat, lon)
+            return ask_groq(groq_key, question, lat, lon, history)
         except Exception as e:
             print("Groq routing error:", e)
 
-    return fallback_answer(question, lat, lon)
+    return fallback_answer(question, lat, lon, history)
 
 
-def chat(question: str, lat: float = 28.6139, lon: float = 77.2090) -> str:
+def chat(question: str, lat: float = 28.6139, lon: float = 77.2090, history: Optional[list] = None) -> str:
     """Route question to Gemini/Groq with strict ~8s deadline; fall back gracefully to Intelligent Local Engine."""
     load_dotenv(override=True)
 
@@ -568,15 +647,15 @@ def chat(question: str, lat: float = 28.6139, lon: float = 77.2090) -> str:
     groq_key = os.getenv("GROQ_API_KEY", "").strip()
 
     if not gemini_key and not groq_key:
-        return fallback_answer(question, lat, lon)
+        return fallback_answer(question, lat, lon, history)
 
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_try_llm_call, question, lat, lon)
+            future = executor.submit(_try_llm_call, question, lat, lon, history)
             return future.result(timeout=AI_TIMEOUT_SECONDS)
     except concurrent.futures.TimeoutError:
         print(f"AI response exceeded {AI_TIMEOUT_SECONDS}s deadline. Falling back to local rules engine.")
-        return fallback_answer(question, lat, lon)
+        return fallback_answer(question, lat, lon, history)
     except Exception as e:
         print("Chat orchestration exception:", e)
-        return fallback_answer(question, lat, lon)
+        return fallback_answer(question, lat, lon, history)

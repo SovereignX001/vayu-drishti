@@ -24,6 +24,36 @@ function getSamplePrompts(loc) {
   ];
 }
 
+function renderFormattedMessage(text) {
+  if (!text) return null;
+
+  const lines = text.split('\n');
+
+  return lines.map((line, lineIdx) => {
+    if (!line.trim()) {
+      return <div key={lineIdx} className="h-2" />;
+    }
+
+    const parts = line.split(/(\*\*[^*]+?\*\*)/g);
+
+    return (
+      <p key={lineIdx} className="leading-relaxed mb-1.5 last:mb-0">
+        {parts.map((part, partIdx) => {
+          if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+            const boldText = part.slice(2, -2);
+            return (
+              <strong key={partIdx} className="font-bold">
+                {boldText}
+              </strong>
+            );
+          }
+          return part;
+        })}
+      </p>
+    );
+  });
+}
+
 export default function AIAssistantView({ 
   onTriggerAlert, 
   currentLocation, 
@@ -104,7 +134,12 @@ export default function AIAssistantView({
     setIsTyping(true);
 
     try {
-      const reply = await askDrishti(query, lat, lon);
+      const chatHistory = messages.slice(-6).map((m) => ({
+        sender: m.sender,
+        text: m.text,
+        time: m.time,
+      }));
+      const reply = await askDrishti(query, lat, lon, chatHistory);
       setMessages((prev) => [
         ...prev,
         {
@@ -201,7 +236,7 @@ export default function AIAssistantView({
                 ? 'bg-ink-900 text-white rounded-[22px] rounded-tr-xs shadow-2xs'
                 : 'bg-[#F4F8F7] border border-slate-200/60 text-ink-900 rounded-[22px] rounded-tl-xs font-medium shadow-2xs'
             }`}>
-              <p>{m.text}</p>
+              {renderFormattedMessage(m.text)}
               <span className={`text-[10px] mt-1.5 block font-mono ${
                 m.sender === 'user' ? 'text-slate-400 text-right' : 'text-slate-400'
               }`}>
