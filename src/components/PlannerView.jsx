@@ -2,11 +2,7 @@ import React, { useState } from 'react';
 import { 
   Clock, 
   Bell, 
-  AlertTriangle, 
-  CheckCircle2, 
-  Trash2, 
-  Car,
-  Trees
+  Trash2
 } from 'lucide-react';
 import { DELHI_LANDMARKS } from '../data/airData';
 
@@ -31,11 +27,13 @@ export default function PlannerView({ onTriggerAlert, toast, setToast }) {
   ]);
 
   const getFutureSituation = (hours, locationName) => {
-    const isPartapur = locationName.includes('Partapur');
-    const isCantt = locationName.includes('Cantt');
-    const isShastri = locationName.includes('Shastri');
+    const loc = String(locationName ?? '').toLowerCase();
+    const isPartapur = loc.includes('partapur');
+    const isCantt = loc.includes('cantt');
+    const isShastri = loc.includes('shastri');
+    const isLodhi = loc.includes('lodhi');
 
-    let baseAqi = isPartapur ? 345 : isCantt ? 58 : isShastri ? 125 : 220;
+    let baseAqi = isPartapur ? 345 : isCantt ? 58 : isShastri ? 125 : isLodhi ? 65 : 220;
 
     let futureAqi = baseAqi;
     let note = '';
@@ -105,20 +103,25 @@ export default function PlannerView({ onTriggerAlert, toast, setToast }) {
   return (
     <div className="space-y-6 animate-in fade-in duration-150 max-w-6xl mx-auto">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200/80">
         <div>
-          <h3 className="text-xl font-black text-slate-900 flex items-center gap-2">
-            <Clock className="w-6 h-6 text-[#00B37E]" />
-            10-Hour Air Planner & Outing Reminder
-          </h3>
-          <p className="text-xs text-slate-500">
-            Check forward air trajectories up to 10 hours ahead and arm automatic alerts for picnics, travel, and outings
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h3 className="text-xl font-black text-ink-900 flex items-center gap-2 font-sans">
+              <Clock className="w-6 h-6 text-accent" />
+              10-Hour Air Planner & Outing Reminder
+            </h3>
+            <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 border border-amber-300">
+              Sample schedule
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Check forward air trajectories up to 10 hours ahead and arm simulated alerts for picnics, travel, and outings
           </p>
         </div>
 
-        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-[#EBF7F2] text-[#00B37E] text-xs font-bold font-mono">
-          <span className="w-2 h-2 rounded-full bg-[#00B37E] animate-ping" />
-          <span>Automated Push Dispatch Active</span>
+        <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold font-mono">
+          <span className="w-2 h-2 rounded-full bg-[#00875A] animate-ping" />
+          <span>Local Alert Dispatch Active</span>
         </div>
       </div>
 
@@ -129,12 +132,12 @@ export default function PlannerView({ onTriggerAlert, toast, setToast }) {
         <div className="lg:col-span-7 space-y-5">
           
           {/* Hour Selector */}
-          <div className="p-6 rounded-[28px] bg-white border border-slate-200/90 shadow-xs space-y-4">
+          <div className="p-6 sm:p-7 rounded-[32px] bg-white border border-slate-100 shadow-soft space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-500 font-mono">
                 Select Forecast Horizon
               </span>
-              <span className="text-sm font-extrabold font-mono text-[#00B37E] bg-[#EBF7F2] px-3.5 py-1 rounded-full">
+              <span className="text-xs font-extrabold font-mono text-ink-900 bg-lime/40 border border-lime/60 px-3.5 py-1 rounded-full">
                 +{hoursAhead} {hoursAhead === 1 ? 'Hour' : 'Hours'} Ahead
               </span>
             </div>
@@ -147,7 +150,7 @@ export default function PlannerView({ onTriggerAlert, toast, setToast }) {
                   onClick={() => setHoursAhead(h)}
                   className={`py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer font-mono ${
                     hoursAhead === h
-                      ? 'bg-[#00B37E] text-white border-[#00B37E] shadow-sm'
+                      ? 'bg-ink-900 text-white border-ink-900 shadow-xs'
                       : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200/60'
                   }`}
                 >
@@ -162,12 +165,12 @@ export default function PlannerView({ onTriggerAlert, toast, setToast }) {
               max="10"
               value={hoursAhead}
               onChange={(e) => setHoursAhead(parseInt(e.target.value))}
-              className="w-full accent-[#00B37E] cursor-pointer"
+              className="w-full accent-accent cursor-pointer"
             />
           </div>
 
           {/* Forecasted Situation */}
-          <div className={`p-6 rounded-[28px] border shadow-xs transition-all ${
+          <div className={`p-6 sm:p-7 rounded-[28px] border shadow-soft transition-all ${
             situation.isHazardous
               ? 'bg-[#FFF5F5] border-[#FECACA]'
               : situation.isModerate
@@ -179,7 +182,7 @@ export default function PlannerView({ onTriggerAlert, toast, setToast }) {
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono block">
                   Projected Situation (+{hoursAhead}h)
                 </span>
-                <h4 className="text-xl font-black text-slate-900 mt-0.5">
+                <h4 className="text-xl font-black text-ink-900 mt-0.5">
                   {selectedLocation}
                 </h4>
               </div>
@@ -187,7 +190,7 @@ export default function PlannerView({ onTriggerAlert, toast, setToast }) {
               <div className="text-right">
                 <span className="text-[10px] uppercase font-mono text-slate-400 block font-bold">Predicted AQI</span>
                 <span className={`text-4xl font-black font-sans ${
-                  situation.isHazardous ? 'text-[#DC2626]' : situation.isModerate ? 'text-[#D97706]' : 'text-[#00B37E]'
+                  situation.isHazardous ? 'text-[#DC2626]' : situation.isModerate ? 'text-[#B45309]' : 'text-[#00875A]'
                 }`}>
                   {situation.aqi}
                 </span>
@@ -196,25 +199,25 @@ export default function PlannerView({ onTriggerAlert, toast, setToast }) {
 
             {/* Metrics */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 my-3 pt-3 border-t border-slate-200/60 text-xs font-mono">
-              <div className="p-3 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
+              <div className="p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs">
                 <span className="text-[10px] text-slate-400 block font-bold">PREDICTED PM2.5</span>
-                <span className="font-extrabold text-slate-900 text-base">{situation.pm25} µg/m³</span>
+                <span className="font-extrabold text-ink-900 text-base">{situation.pm25} µg/m³</span>
               </div>
-              <div className="p-3 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
+              <div className="p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs">
                 <span className="text-[10px] text-slate-400 block font-bold">INVERSION CEILING</span>
-                <span className="font-extrabold text-slate-900 text-base">{situation.inversion}</span>
+                <span className="font-extrabold text-ink-900 text-base">{situation.inversion}</span>
               </div>
-              <div className="p-3 rounded-2xl bg-white border border-slate-200/80 shadow-xs col-span-2 sm:col-span-1">
+              <div className="p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs col-span-2 sm:col-span-1">
                 <span className="text-[10px] text-slate-400 block font-bold">OUTING STATUS</span>
                 <span className={`font-extrabold text-base ${
-                  situation.isHazardous ? 'text-[#DC2626]' : situation.isModerate ? 'text-[#D97706]' : 'text-[#00B37E]'
+                  situation.isHazardous ? 'text-[#DC2626]' : situation.isModerate ? 'text-[#B45309]' : 'text-[#00875A]'
                 }`}>
                   {situation.isHazardous ? 'Delay Travel' : situation.isModerate ? 'Moderate' : 'Picnic Approved'}
                 </span>
               </div>
             </div>
 
-            <p className="text-xs text-slate-700 leading-relaxed pt-1">
+            <p className="text-xs text-slate-700 leading-relaxed pt-1 font-medium">
               <strong>Tip for Citizens:</strong> {situation.note}
             </p>
           </div>
@@ -224,9 +227,9 @@ export default function PlannerView({ onTriggerAlert, toast, setToast }) {
         {/* Right: Arm Reminder Form */}
         <div className="lg:col-span-5 space-y-5">
           
-          <div className="p-6 rounded-[28px] bg-white border border-slate-200/90 shadow-xs space-y-4">
+          <div className="p-6 sm:p-7 rounded-[32px] bg-white border border-slate-100 shadow-soft space-y-4">
             <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider font-mono flex items-center gap-2">
-              <Bell className="w-4 h-4 text-[#00B37E]" />
+              <Bell className="w-4 h-4 text-accent" />
               Arm Automated Outing Alert
             </h4>
 
@@ -237,7 +240,7 @@ export default function PlannerView({ onTriggerAlert, toast, setToast }) {
               <select
                 value={selectedLocation}
                 onChange={(e) => setSelectedLocation(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-[#00B37E]"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-accent"
               >
                 {DELHI_LANDMARKS.map((lm) => (
                   <option key={lm.num} value={lm.name}>
@@ -254,7 +257,7 @@ export default function PlannerView({ onTriggerAlert, toast, setToast }) {
               <select
                 value={selectedActivity}
                 onChange={(e) => setSelectedActivity(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-[#00B37E]"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-accent"
               >
                 <option value="Family Picnic & Park Outing">Family Picnic & Park Outing</option>
                 <option value="Morning Jog, Cycling & Workout">Morning Jog, Cycling & Workout</option>
@@ -282,7 +285,7 @@ export default function PlannerView({ onTriggerAlert, toast, setToast }) {
 
             <button
               onClick={handleSetReminder}
-              className="w-full py-3.5 px-4 rounded-2xl bg-[#00B37E] hover:bg-[#059669] text-white font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+              className="w-full py-3.5 px-4 rounded-2xl bg-accent hover:bg-[#e65a26] text-white font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-chip"
             >
               <Bell className="w-4 h-4" />
               <span>Set Automated Alert & Reminder</span>
@@ -290,10 +293,10 @@ export default function PlannerView({ onTriggerAlert, toast, setToast }) {
           </div>
 
           {/* Active Alerts List */}
-          <div className="p-6 rounded-[28px] bg-white border border-slate-200/90 shadow-xs space-y-3">
+          <div className="p-6 sm:p-7 rounded-[32px] bg-white border border-slate-100 shadow-soft space-y-3">
             <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider font-mono flex items-center justify-between">
               <span>Active Scheduled Alerts ({scheduledReminders.length})</span>
-              <span className="text-[#00B37E] text-[10px]">Auto-Monitor Active</span>
+              <span className="text-[#00875A] text-[10px] font-bold">Auto-Monitor Active</span>
             </h4>
 
             <div className="space-y-2">
@@ -311,7 +314,7 @@ export default function PlannerView({ onTriggerAlert, toast, setToast }) {
                         Pred: {rem.predictedAqi} AQI
                       </span>
                     </div>
-                    <p className="text-xs font-bold text-slate-900">{rem.activity}</p>
+                    <p className="text-xs font-bold text-ink-900">{rem.activity}</p>
                     <p className="text-[10px] text-slate-500 font-mono truncate">{rem.location}</p>
                   </div>
 

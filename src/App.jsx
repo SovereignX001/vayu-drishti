@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import TopNav from './components/TopNav';
 import BreatheEasyHero from './components/BreatheEasyHero';
@@ -12,6 +12,7 @@ import ZoneSelectorModal from './components/ZoneSelectorModal';
 import Toast from './components/Toast';
 import DownscalingModal from './components/DownscalingModal';
 import AnalyticsView from './components/AnalyticsView';
+import ErrorBoundary from './components/ErrorBoundary';
 import { ZONES, POPULAR_SEARCH_LOCATIONS, DEFAULT_CITY } from './data/airData';
 
 export default function App() {
@@ -22,7 +23,31 @@ export default function App() {
   const [isZoneModalOpen, setIsZoneModalOpen] = useState(false);
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [currentLocation, setCurrentLocation] = useState(POPULAR_SEARCH_LOCATIONS[0]);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [currentLocation, setCurrentLocation] = useState(() => {
+    try {
+      const saved = localStorage.getItem('vayu_last_searched_location');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed.lat === 'number' && typeof parsed.lng === 'number') {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse saved location from localStorage:', e);
+    }
+    return POPULAR_SEARCH_LOCATIONS[0];
+  });
+
+  const handleSelectLocation = (loc) => {
+    if (!loc) return;
+    setCurrentLocation(loc);
+    try {
+      localStorage.setItem('vayu_last_searched_location', JSON.stringify(loc));
+    } catch (e) {
+      console.error('Failed to save last searched location:', e);
+    }
+  };
   const [selectedCity, setSelectedCity] = useState(DEFAULT_CITY);
 
   // Alert State & Toast
@@ -74,41 +99,69 @@ export default function App() {
     setAlertState({
       dispatched: true,
       zoneId: zone.id,
-      alertId: `VAYU-${Math.floor(1000 + Math.random() * 9000)}`,
+      alertId: `DEMO-${Math.floor(1000 + Math.random() * 9000)}`,
     });
 
-    setToast({
-      title: 'Vayu Drishti Alert Dispatched',
-      message: 'Clean air travel advisory & mask warning broadcast to 1,240 contacts',
+
+  };
+
+  // Air Alert Toggle State with localStorage persistence
+  const [isAlertsEnabled, setIsAlertsEnabled] = useState(() => {
+    try {
+      const saved = localStorage.getItem('vayu_air_alerts_enabled');
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleAlerts = () => {
+    setIsAlertsEnabled((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('vayu_air_alerts_enabled', JSON.stringify(next));
+      } catch {
+        // Ignore localStorage write error
+      }
+      return next;
     });
   };
 
+
+
   return (
-    <div className="min-h-screen w-full bg-[#F4F6F8] text-slate-800 flex flex-row font-sans antialiased select-none overflow-x-hidden">
+    <div className="min-h-screen w-full bg-[#FAF8F5] flex flex-row relative font-sans antialiased text-ink-900 overflow-x-hidden">
       
-      {/* 1. White Retractable Sidebar */}
+      {/* 1. White Slim Retractable Sidebar with Orange Indicator */}
       <Sidebar 
         activeTab={activeTab} 
         setActiveTab={(tab) => setActiveTab(tab)} 
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
+        isMobileOpen={isMobileNavOpen}
+        onCloseMobile={() => setIsMobileNavOpen(false)}
       />
 
-      {/* 2. Main Canvas (Pinned sidebar with smooth retractable margin transition) */}
-      <div className={`flex-1 min-w-0 flex flex-col bg-[#F4F6F8] min-h-screen transition-all duration-300 ease-in-out ${
-        isSidebarCollapsed ? 'ml-20' : 'ml-60 lg:ml-64'
-      }`}>
+      {/* 2. Main Content Canvas - Full Screen Cover */}
+      <div className="flex-1 min-w-0 flex flex-col bg-[#F8FAF9] overflow-hidden min-h-screen">
         
-        {/* Top Navigation Bar with General Outing Status, Air Alert On & Temp */}
+        {/* Top Navigation Bar with Greeting, Pill Search & Soft Round Icon Buttons */}
         <TopNav
           currentZone={selectedZone}
           timeframe={timeframe}
+          onOpenMobileNav={() => setIsMobileNavOpen(true)}
+          isAlertsEnabled={isAlertsEnabled}
+          onToggleAlerts={toggleAlerts}
+          currentLocation={currentLocation}
+          onSelectLocation={handleSelectLocation}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
         />
 
-        {/* Dynamic Viewport according to activeTab */}
-        <main className="flex-1 p-5 sm:p-7 lg:p-9 space-y-6 overflow-y-auto">
-          
-          {/* TAB 1: HOME (Universal Public Advice: Picnics, Masks, Travel Delays) */}
+          {/* Dynamic Viewport according to activeTab */}
+          <main className="flex-1 p-3.5 sm:p-5 md:p-6 lg:p-8 space-y-6 overflow-y-auto min-w-0 max-w-full">
+            <ErrorBoundary key={activeTab}>
+            {/* TAB 1: HOME (Universal Public Advice: Picnics, Masks, Travel Delays) */}
           {activeTab === 'home' && (
             <BreatheEasyHero
               zone={selectedZone}
@@ -120,7 +173,7 @@ export default function App() {
               selectedZoneId={selectedZoneId}
               onSelectZone={(id) => setSelectedZoneId(id)}
               currentLocation={currentLocation}
-              onSelectLocation={setCurrentLocation}
+              onSelectLocation={handleSelectLocation}
             />
           )}
 
@@ -134,16 +187,16 @@ export default function App() {
             <div className="space-y-4 animate-in fade-in duration-150 max-w-[1720px] mx-auto">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-xl font-black text-slate-900">
+                  <h3 className="text-xl font-black text-ink-900 font-sans">
                     Interactive Pollution Density Map
                   </h3>
-                  <p className="text-xs text-slate-500">
-                    Live Google Maps / Mappls engine with multi-shade AQI density heatmap and city landmark switcher
+                  <p className="text-xs text-slate-500 font-medium">
+                    Live OpenStreetMap Standard engine with multi-shade AQI density heatmap and city landmark switcher
                   </p>
                 </div>
                 <button
                   onClick={() => setActiveTab('home')}
-                  className="px-4 py-2 rounded-2xl bg-white border border-slate-200 text-slate-800 text-xs font-bold hover:bg-slate-50 shadow-xs transition-colors cursor-pointer"
+                  className="px-5 py-2.5 rounded-full bg-white border border-slate-200 text-ink-900 text-xs font-bold hover:bg-slate-50 shadow-soft transition-all cursor-pointer active:scale-95"
                 >
                   ← Back to Home
                 </button>
@@ -156,6 +209,8 @@ export default function App() {
                 selectedZoneId={selectedZoneId}
                 onSelectZone={(id) => setSelectedZoneId(id)}
                 timeframe={timeframe}
+                currentLocation={currentLocation}
+                onSelectLocation={handleSelectLocation}
               />
             </div>
           )}
@@ -185,7 +240,7 @@ export default function App() {
               setTimeframe={setTimeframe} 
               currentZone={selectedZone}
               currentLocation={currentLocation}
-              onSelectLocation={setCurrentLocation}
+              onSelectLocation={handleSelectLocation}
             />
           )}
 
@@ -201,8 +256,31 @@ export default function App() {
           {activeTab === 'settings' && (
             <SettingsView />
           )}
-
+          </ErrorBoundary>
         </main>
+
+        {/* Attribution Footer */}
+        <footer className="px-5 sm:px-7 lg:px-9 py-3 border-t border-slate-200 text-center text-xs text-slate-500 font-sans">
+          Live weather and air-quality data:{' '}
+          <a
+            href="https://open-meteo.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-slate-700 hover:text-[#00B37E] underline font-medium"
+          >
+            Open-Meteo
+          </a>{' '}
+          (
+          <a
+            href="https://atmosphere.copernicus.eu"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-slate-700 hover:text-[#00B37E] underline font-medium"
+          >
+            Copernicus CAMS
+          </a>
+          ). Forecasts: LightGBM models trained on historical Indian AQI data. Geocoding: OpenStreetMap.
+        </footer>
 
       </div>
 
@@ -214,10 +292,9 @@ export default function App() {
         onSelectZone={(id) => setSelectedZoneId(id)}
       />
 
-      {/* Toast */}
-      <Toast toast={toast} onClose={() => setToast(null)} />
 
-      {/* Downscaling Modal */}
+
+      {/* Architecture Explainer Modal */}
       <DownscalingModal
         isOpen={isModelModalOpen}
         onClose={() => setIsModelModalOpen(false)}

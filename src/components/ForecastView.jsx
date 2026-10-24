@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Compass, 
   Wind, 
@@ -19,9 +19,29 @@ import {
   TrendingUp, 
   Activity,
   Navigation,
-  ExternalLink
+  ExternalLink,
+  Loader2
 } from 'lucide-react';
 import LocationSearchBar from './LocationSearchBar';
+import { getForecast, getLiveAqiByCoords, getMetrics } from '../lib/api';
+
+const SLOT_CONFIG = [
+  { targetHour: 6, label: '06:00 AM', period: 'Early Dawn' },
+  { targetHour: 9, label: '08:30 AM', period: 'Morning Peak' },
+  { targetHour: 11, label: '11:30 AM', period: 'Mid-Morning' },
+  { targetHour: 14, label: '02:00 PM', period: 'Afternoon Window' },
+  { targetHour: 18, label: '06:30 PM', period: 'Evening Rush' },
+  { targetHour: 22, label: '10:00 PM', period: 'Late Night' },
+];
+
+function formatTimeAgo(timestamp) {
+  if (!timestamp) return 'recently';
+  const diffMs = Date.now() - timestamp;
+  const mins = Math.max(1, Math.round(diffMs / 60000));
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+}
 
 export default function ForecastView({ 
   timeframe, 
@@ -39,12 +59,53 @@ export default function ForecastView({
     lng: 77.7060,
     accuracy: '±3.2m',
     altitude: '224m ASL',
-    station: 'UPPCB Sensor Node UP-MRT-02',
-    distance: '210m from current position',
-    syncTime: 'Live (Updated 20s ago)',
+    station: 'Regional Environmental Sensor Node',
+    distance: 'Linked via Search',
+    syncTime: 'Live Telemetry Fix',
     aqi: 165,
     pm25: 118
   });
+
+  // Backend model validation metrics state
+  const [metricsData, setMetricsData] = useState(null);
+  const [isLoadingMetrics, setIsLoadingMetrics] = useState(false);
+  const [metricsError, setMetricsError] = useState(null);
+
+  const fetchMetrics = () => {
+    setIsLoadingMetrics(true);
+    setMetricsError(null);
+    getMetrics()
+      .then((data) => {
+        setMetricsData(data);
+        setIsLoadingMetrics(false);
+      })
+      .catch((err) => {
+        console.error('Failed to fetch metrics:', err);
+        setMetricsError('Metrics unavailable');
+        setIsLoadingMetrics(false);
+      });
+  };
+
+  useEffect(() => {
+    fetchMetrics();
+  }, []);
+
+  const activeCityKey = useMemo(() => {
+    if (!metricsData) return null;
+    const availableCities = Object.keys(metricsData);
+    const textToSearch = `${gpsData.city || ''} ${gpsData.name || ''} ${gpsData.region || ''}`.toLowerCase();
+    for (const city of availableCities) {
+      if (textToSearch.includes(city.toLowerCase())) {
+        return city;
+      }
+    }
+    if (Math.abs((gpsData.lat || 0) - 28.98) < 0.25 && Math.abs((gpsData.lng || 0) - 77.7) < 0.25) {
+      return 'Meerut';
+    }
+    return null;
+  }, [metricsData, gpsData.city, gpsData.name, gpsData.region, gpsData.lat, gpsData.lng]);
+
+  const cityMetrics = activeCityKey ? metricsData[activeCityKey] : null;
 
   // Sync when currentLocation changes
   useEffect(() => {
@@ -70,17 +131,59 @@ export default function ForecastView({
     }
   };
 
+  const [forecastData, setForecastData] = useState(null);
+  const [isLoadingForecast, setIsLoadingForecast] = useState(false);
+  const [forecastError, setForecastError] = useState(null);
+
+  const fetchForecast = (lat, lng, signal) => {
+    setIsLoadingForecast(true);
+    setForecastError(null);
+    getForecast(lat, lng)
+      .then((data) => {
+        if (!signal?.aborted) {
+          setForecastData(data);
+          setIsLoadingForecast(false);
+        }
+      })
+      .catch((err) => {
+        if (!signal?.aborted) {
+          console.error('Failed to fetch forecast:', err);
+          setForecastError(err.message || 'Forecast not available for this location.');
+          setIsLoadingForecast(false);
+        }
+      });
+  };
+
+  useEffect(() => {
+    const lat = gpsData?.lat ?? 28.9886;
+    const lng = gpsData?.lng ?? gpsData?.lon ?? 77.706;
+    const controller = new AbortController();
+
+    fetchForecast(lat, lng, controller.signal);
+
+    return () => {
+      controller.abort();
+    };
+  }, [gpsData?.lat, gpsData?.lng, gpsData?.lon]);
+
   const handleRefreshGps = () => {
     setIsGpsLocating(true);
     if (typeof navigator !== 'undefined' && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
+        async (pos) => {
           const lat = Number(pos.coords.latitude.toFixed(4));
           const lng = Number(pos.coords.longitude.toFixed(4));
+          let liveData = {};
+          try {
+            liveData = await getLiveAqiByCoords(lat, lng);
+          } catch (e) {
+            console.error('Failed to fetch live AQI on GPS lock in ForecastView:', e);
+          }
           const updated = {
             ...gpsData,
-            name: 'Current Browser GPS Location',
-            region: 'Live Satellite Fix',
+            ...liveData,
+            name: liveData.city || 'Current Browser GPS Location',
+            region: liveData.state ? `${liveData.city || ''}, ${liveData.state}` : 'Live Satellite Fix',
             lat,
             lng,
             accuracy: `±${Math.round(pos.coords.accuracy)}m`,
@@ -107,80 +210,102 @@ export default function ForecastView({
     }
   };
 
-  // Base AQI scaled dynamically for searched location
-  const baseAqi = gpsData.aqi || 165;
-  const morningPeakAqi = Math.round(baseAqi * 1.55);
-  const afternoonAqi = Math.max(35, Math.round(baseAqi * 0.42));
+  const forecastSlots = useMemo(() => {
+    const hours = forecastData?.hours;
+    if (!hours || !Array.isArray(hours) || hours.length === 0) {
+      return [];
+    }
 
-  // 24-Hour Forecast Slots dynamically scaled for User's Location
-  const forecastSlots = [
-    { 
-      label: '06:00 AM', 
-      period: 'Early Dawn',
-      aqi: Math.round(baseAqi * 0.95), 
-      pm25: Math.round(baseAqi * 0.75), 
-      condition: 'Nocturnal Inversion Trap', 
-      severity: baseAqi * 0.95 > 200 ? 'severe' : 'moderate',
-      inversion: '190m Ceiling',
-      wind: '3 km/h Calm',
-      tip: 'Chilly ground air traps exhaust. Postpone early morning jog.' 
-    },
-    { 
-      label: '08:30 AM', 
-      period: 'Morning Peak',
-      aqi: morningPeakAqi, 
-      pm25: Math.round(morningPeakAqi * 0.85), 
-      condition: 'Peak Commute Toxic Spike', 
-      severity: 'severe',
-      inversion: '175m Surface Choke',
-      wind: '5 km/h SE',
-      tip: `Severe spike across ${gpsData.name}. Travel with N95 mask; delay outdoor walks.` 
-    },
-    { 
-      label: '11:30 AM', 
-      period: 'Mid-Morning',
-      aqi: Math.round(baseAqi * 1.05), 
-      pm25: Math.round(baseAqi * 0.82), 
-      condition: 'Solar Thermal Lifting', 
-      severity: baseAqi * 1.05 > 200 ? 'severe' : 'moderate',
-      inversion: '520m Lifting',
-      wind: '8 km/h SE',
-      tip: 'Sunlight breaks surface boundary layer; dispersion begins.' 
-    },
-    { 
-      label: '02:00 PM', 
-      period: 'Afternoon Window',
-      aqi: afternoonAqi, 
-      pm25: Math.round(afternoonAqi * 0.6), 
-      condition: 'Maximum Convective Mixing', 
-      severity: afternoonAqi <= 70 ? 'good' : 'moderate',
-      inversion: '1,100m High Mixing',
-      wind: '12 km/h SE',
-      tip: 'Best time of day! Cleanest air window for outdoor picnic, lunch walks & fresh air.' 
-    },
-    { 
-      label: '06:30 PM', 
-      period: 'Evening Rush',
-      aqi: Math.round(baseAqi * 1.3), 
-      pm25: Math.round(baseAqi * 1.05), 
-      condition: 'Evening Traffic Inrush', 
-      severity: baseAqi * 1.3 > 200 ? 'severe' : 'moderate',
-      inversion: '310m Lowering',
-      wind: '6 km/h Calm',
-      tip: 'Peak evening transit surge. Keep car AC in cabin recirculation mode.' 
-    },
-    { 
-      label: '10:00 PM', 
-      period: 'Late Night',
-      aqi: Math.round(baseAqi * 1.45), 
-      pm25: Math.round(baseAqi * 1.15), 
-      condition: 'Nocturnal Boundary Reset', 
-      severity: 'severe',
-      inversion: '180m Cold Trap',
-      wind: '2 km/h Stagnant',
-      tip: 'Cool ground resets nocturnal trap. Keep home windows sealed; run air purifier.' 
-    },
-  ];
+    return SLOT_CONFIG.map((cfg) => {
+      let closest = hours[0];
+      let minDiff = 999;
+      for (const h of hours) {
+        let hHour = 0;
+        try {
+          hHour = new Date(h.time).getHours();
+        } catch {
+          const match = h.time.match(/T(\d\d):/);
+          if (match) hHour = parseInt(match[1], 10);
+        }
+        const diff = Math.abs(hHour - cfg.targetHour);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = h;
+        }
+      }
+
+      const slotAqi = closest ? Math.round(closest.aqi) : (gpsData.aqi || 100);
+      const pm25 = Math.round(slotAqi * 0.72);
+      const isGood = slotAqi <= 100;
+      const isSevere = slotAqi > 200;
+      const severity = isGood ? 'good' : isSevere ? 'severe' : 'moderate';
+
+      let condition = 'Surface Boundary Reset';
+      let inversion = '320m Standard';
+      let wind = '6 km/h Breeze';
+      let tip = `Forecasted AQI ${slotAqi} across ${gpsData.name || 'your area'}.`;
+
+      if (isGood) {
+        condition = 'Maximum Convective Mixing';
+        inversion = '1,100m High Mixing';
+        wind = '12 km/h Moderate';
+        tip = `Cleanest air window for ${gpsData.name || 'your area'}! Ideal for outdoor plans.`;
+      } else if (isSevere) {
+        condition = 'Surface Boundary Inversion Trap';
+        inversion = '175m Cold Trap';
+        wind = '3 km/h Stagnant';
+        tip = `Severe particulate spike across ${gpsData.name || 'your area'}. Travel with N95 mask.`;
+      } else {
+        condition = 'Solar Thermal Dispersion';
+        inversion = '520m Lifting';
+        wind = '7 km/h Light';
+        tip = `Moderate air quality across ${gpsData.name || 'your area'}. Sensitive groups take care.`;
+      }
+
+      return {
+        label: cfg.label,
+        period: cfg.period,
+        aqi: slotAqi,
+        pm25,
+        condition,
+        severity,
+        inversion,
+        wind,
+        tip,
+      };
+    });
+  }, [forecastData, gpsData.name, gpsData.aqi]);
+
+  const { peakSlot, cleanSlot } = useMemo(() => {
+    const hours = forecastData?.hours;
+    if (!hours || !Array.isArray(hours) || hours.length === 0) {
+      return { peakSlot: null, cleanSlot: null };
+    }
+    let max = hours[0];
+    let min = hours[0];
+    for (const h of hours) {
+      if (h.aqi > max.aqi) max = h;
+      if (h.aqi < min.aqi) min = h;
+    }
+    const formatHour = (tStr) => {
+      try {
+        const d = new Date(tStr);
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      } catch {
+        return tStr;
+      }
+    };
+    return {
+      peakSlot: {
+        time: formatHour(max.time),
+        aqi: Math.round(max.aqi),
+      },
+      cleanSlot: {
+        time: formatHour(min.time),
+        aqi: Math.round(min.aqi),
+      },
+    };
+  }, [forecastData]);
 
   const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${gpsData.lat},${gpsData.lng}`;
 
@@ -196,37 +321,43 @@ export default function ForecastView({
       />
 
       {/* 1. CURRENT LOCATION LIVE GPS HEADER (Pure Light Card, No Dark Elements) */}
-      <div className="p-6 sm:p-7 rounded-[32px] bg-white border border-slate-200 shadow-sm flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+      <div className="p-5 sm:p-7 rounded-[28px] sm:rounded-[36px] bg-white border border-slate-100 shadow-soft flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
         
         {/* Left Side: GPS Identity */}
         <div className="flex items-start sm:items-center gap-4 sm:gap-5">
           <div className="relative flex-shrink-0">
-            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-[#00B37E]/10 border border-[#00B37E]/30 flex items-center justify-center text-[#00B37E]">
+            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
               <Crosshair className="w-7 h-7 sm:w-8 sm:h-8 animate-pulse" />
             </div>
             <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00B37E] opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-[#00B37E]"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-accent"></span>
             </span>
           </div>
 
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-[#00B37E]/15 text-[#00B37E] font-mono">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-accent/10 text-accent font-mono">
                 <Radio className="w-3 h-3 animate-pulse" />
                 Current Location Predictive Forecast
               </span>
               <span className="text-xs text-slate-400 font-mono">
                 • {gpsData.syncTime}
               </span>
+              {forecastData?.stale && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 border border-amber-200 text-amber-800 font-mono">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  Offline: showing forecast saved {formatTimeAgo(forecastData.savedAt)}
+                </span>
+              )}
             </div>
 
-            <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight font-sans">
+            <h3 className="text-xl sm:text-2xl font-black text-ink-900 tracking-tight font-sans">
               {gpsData.name}
             </h3>
 
             <p className="text-xs sm:text-sm text-slate-500 font-medium">
-              {gpsData.region} • <span className="text-slate-700 font-semibold">{gpsData.station}</span> ({gpsData.distance})
+              {gpsData.region} • <span className="text-ink-800 font-semibold">{gpsData.station}</span> ({gpsData.distance})
             </p>
           </div>
         </div>
@@ -236,12 +367,12 @@ export default function ForecastView({
           
           <div className="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200/80 text-xs font-mono text-slate-700">
             <span className="text-[10px] text-slate-400 uppercase block font-sans font-bold">GPS Coordinates</span>
-            <span className="font-extrabold text-slate-900">{gpsData.lat}° N, {gpsData.lng}° E</span>
+            <span className="font-extrabold text-ink-900">{gpsData.lat}° N, {gpsData.lng}° E</span>
           </div>
 
           <div className="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200/80 text-xs font-mono text-slate-700">
             <span className="text-[10px] text-slate-400 uppercase block font-sans font-bold">Accuracy</span>
-            <span className="font-extrabold text-[#00B37E]">{gpsData.accuracy || '±3.2m'}</span>
+            <span className="font-extrabold text-[#00875A]">{gpsData.accuracy || '±3.2m'}</span>
           </div>
 
           <a
@@ -251,7 +382,7 @@ export default function ForecastView({
             className="px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
             title="Open coordinates in Google Maps"
           >
-            <Navigation className="w-3.5 h-3.5 text-[#00B37E]" />
+            <Navigation className="w-3.5 h-3.5 text-accent" />
             <span>Google Maps</span>
             <ExternalLink className="w-3 h-3 text-slate-400" />
           </a>
@@ -259,7 +390,7 @@ export default function ForecastView({
           <button
             onClick={handleRefreshGps}
             disabled={isGpsLocating}
-            className="px-4 py-2.5 rounded-xl bg-[#00B37E] hover:bg-[#009B6D] text-white text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-70"
+            className="px-4 py-2.5 rounded-xl bg-ink-900 hover:bg-ink-800 text-white text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer shadow-chip active:scale-95 disabled:opacity-70"
             title="Recalibrate GPS position"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isGpsLocating ? 'animate-spin' : ''}`} />
@@ -270,133 +401,160 @@ export default function ForecastView({
 
       </div>
 
-      {/* PREDICTION ACCURACY & GROUND TRUTH VALIDATION ENGINE (Shifted from Home Tab) */}
-      <div className="p-7 sm:p-8 rounded-[32px] bg-white border border-slate-200/90 shadow-sm space-y-6">
+      {/* FORECAST MODEL VALIDATION & PERFORMANCE METRICS */}
+      <div className="p-5 sm:p-8 rounded-[28px] sm:rounded-[36px] bg-white border border-slate-100 shadow-soft space-y-6">
         
         {/* Section Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-[#00B37E]/10 text-[#00B37E] flex items-center justify-center flex-shrink-0">
+            <div className="w-12 h-12 rounded-2xl bg-accent/10 text-accent flex items-center justify-center flex-shrink-0">
               <Activity className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-base sm:text-lg font-black text-slate-900 font-sans flex items-center gap-2">
-                Forecast Accuracy & Ground Truth Validation Engine
-                <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-[#00B37E]/15 text-[#00B37E]">
-                  Real-Time Verified
+              <h3 className="text-base sm:text-lg font-black text-ink-900 font-sans flex items-center gap-2">
+                Forecast Model Validation & Performance Metrics
+                <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-lime/40 text-ink-900 border border-lime/60">
+                  Held-Out Test Split
                 </span>
               </h3>
               <p className="text-xs text-slate-500 font-sans mt-0.5">
-                Evaluated against 30-day historical trend backtests and synchronized with UPPCB reference monitors
+                Evaluated on held-out 15% temporal test split against naive persistence baselines
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-auto px-3.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono font-bold text-slate-700 shadow-2xs">
-            <span className="w-2 h-2 rounded-full bg-[#00B37E] animate-pulse" />
-            <span>Nearest Station: UPPCB Node UP-MRT-02 (210m away)</span>
+          <div className="flex items-center gap-2 self-start sm:self-auto px-3.5 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-xs font-mono font-bold text-slate-700 shadow-2xs">
+            <span className={`w-2 h-2 rounded-full ${cityMetrics ? 'bg-[#00875A]' : 'bg-slate-400'} animate-pulse`} />
+            <span>{activeCityKey ? `Evaluation: ${activeCityKey}` : 'Not evaluated for this city'}</span>
+            {metricsData?.stale && (
+              <span className="text-[10px] font-semibold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-md">
+                Offline ({formatTimeAgo(metricsData.savedAt)})
+              </span>
+            )}
           </div>
         </div>
 
-        {/* 2-Column Grid: Past Trends Accuracy vs Nearest Station Accuracy */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          
-          {/* Card A: Accuracy Based on Past Trends */}
-          <div className="p-6 sm:p-7 rounded-[26px] bg-[#F8FAFC] border border-slate-200/80 space-y-4 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono uppercase tracking-wider font-extrabold text-slate-400">
-                  Historical Trend Accuracy
-                </span>
-                <span className="text-xs font-bold text-[#00B37E] bg-[#00B37E]/10 px-2.5 py-0.5 rounded-full font-mono">
-                  30-Day Backtest
-                </span>
-              </div>
-
-              <div className="my-3 flex items-baseline gap-2">
-                <span className="text-5xl font-black font-sans text-slate-900">97.4%</span>
-                <span className="text-xs font-bold text-[#00B37E] font-mono">Model Fidelity</span>
-              </div>
-
-              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-sans font-medium">
-                Tested across <strong>720 continuous hourly forecast cycles</strong> across Meerut's seasonal weather patterns. The physics-informed GAN correctly anticipated <strong>98.2%</strong> of morning boundary layer traps and convective lifting windows.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2.5 pt-3 border-t border-slate-200/60 text-center font-mono">
-              <div className="p-2.5 rounded-xl bg-white border border-slate-200/70 shadow-2xs">
-                <span className="text-[10px] text-slate-400 uppercase block font-sans font-bold">MAE Drift</span>
-                <span className="text-xs font-extrabold text-slate-800">±4.2 AQI</span>
-              </div>
-              <div className="p-2.5 rounded-xl bg-white border border-slate-200/70 shadow-2xs">
-                <span className="text-[10px] text-slate-400 uppercase block font-sans font-bold">RMSE Error</span>
-                <span className="text-xs font-extrabold text-slate-800">6.8 µg/m³</span>
-              </div>
-              <div className="p-2.5 rounded-xl bg-white border border-slate-200/70 shadow-2xs">
-                <span className="text-[10px] text-slate-400 uppercase block font-sans font-bold">R² Score</span>
-                <span className="text-xs font-extrabold text-[#00B37E]">0.962</span>
-              </div>
-            </div>
+        {/* Loading state */}
+        {isLoadingMetrics && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="p-7 rounded-[26px] bg-slate-50 border border-slate-200 animate-pulse h-64"></div>
+            <div className="p-7 rounded-[26px] bg-slate-50 border border-slate-200 animate-pulse h-64"></div>
           </div>
+        )}
 
-          {/* Card B: Accuracy Relative to Nearest Station's Data */}
-          <div className="p-6 sm:p-7 rounded-[26px] bg-[#F8FAFC] border border-slate-200/80 space-y-4 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono uppercase tracking-wider font-extrabold text-slate-400">
-                  Relative Station Accuracy
-                </span>
-                <span className="text-xs font-bold text-[#00B37E] bg-[#00B37E]/10 px-2.5 py-0.5 rounded-full font-mono">
-                  Live Station Calibration
-                </span>
-              </div>
-
-              <div className="my-3 flex items-baseline gap-2">
-                <span className="text-5xl font-black font-sans text-slate-900">96.8%</span>
-                <span className="text-xs font-bold text-[#00B37E] font-mono">Correlation vs UP-MRT-02</span>
-              </div>
-
-              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-sans font-medium">
-                Live convergence relative to the nearest reference monitor (<strong>UPPCB Station UP-MRT-02</strong>, 210m from your current position). Sensor variance is restricted to within <strong>±2.0 µg/m³</strong>, validating hyper-local 250m downscale fidelity.
-              </p>
-            </div>
-
-            {/* Visual Live Comparison Gauges */}
-            <div className="p-4 rounded-2xl bg-white border border-slate-200/70 space-y-3 shadow-2xs">
+        {/* Error state */}
+        {!isLoadingMetrics && metricsError && (
+          <div className="p-6 rounded-[24px] bg-rose-50 border border-rose-200 text-rose-900 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="w-6 h-6 text-[#DC2626] flex-shrink-0" />
               <div>
-                <div className="flex items-center justify-between text-xs font-sans mb-1.5">
-                  <span className="font-bold text-slate-700 flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
-                    Nearest Station (UPPCB Ground Truth):
-                  </span>
-                  <span className="font-extrabold font-mono text-slate-900">178 µg/m³ PM2.5</span>
-                </div>
-                <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                  <div className="bg-slate-400 h-full rounded-full transition-all duration-700" style={{ width: '51%' }} />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between text-xs font-sans mb-1.5">
-                  <span className="font-bold text-slate-700 flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#00B37E]" />
-                    Vayu Drishti AI Prediction (250m Local):
-                  </span>
-                  <span className="font-extrabold font-mono text-[#00B37E]">180 µg/m³ PM2.5</span>
-                </div>
-                <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                  <div className="bg-[#00B37E] h-full rounded-full transition-all duration-700" style={{ width: '51.4%' }} />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 pt-2 border-t border-slate-100">
-                <span>Variance: <strong className="text-slate-900">+1.1% (±2.0 µg/m³)</strong></span>
-                <span className="text-[#00B37E] font-bold">✓ High Precision Agreement</span>
+                <p className="text-sm font-bold text-slate-900">Metrics unavailable</p>
+                <p className="text-xs text-slate-600 mt-0.5">Could not load model validation metrics from backend.</p>
               </div>
             </div>
+            <button
+              onClick={fetchMetrics}
+              className="px-4 py-2 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Retry</span>
+            </button>
           </div>
+        )}
 
-        </div>
+        {/* City not evaluated state */}
+        {!isLoadingMetrics && !metricsError && !cityMetrics && (
+          <div className="p-7 rounded-[26px] bg-slate-50 border border-slate-200/80 text-center space-y-2">
+            <p className="text-sm font-bold text-ink-900">Not evaluated for this city</p>
+            <p className="text-xs text-slate-500 max-w-xl mx-auto">
+              Forecast models have not been evaluated for {gpsData.name || 'this location'} yet. Evaluated cities in backend: Meerut, Delhi, Noida, Gurugram, Ghaziabad, Lucknow, Agra, Jaipur.
+            </p>
+          </div>
+        )}
+
+        {/* Real Metrics 2-Column Grid */}
+        {!isLoadingMetrics && !metricsError && cityMetrics && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* Card A: Real LightGBM Held-Out Out-of-Sample Metrics */}
+            <div className="p-6 sm:p-7 rounded-[28px] bg-slate-50/80 border border-slate-200/70 space-y-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono uppercase tracking-wider font-extrabold text-slate-400">
+                    Temporal Out-of-Sample Test
+                  </span>
+                  <span className="text-xs font-bold text-ink-900 bg-lime/40 px-3 py-1 rounded-full font-mono border border-lime/60">
+                    Held-out 15% Split
+                  </span>
+                </div>
+
+                <div className="my-3 flex items-baseline gap-2">
+                  <span className="text-5xl font-black font-sans text-ink-900">{cityMetrics.avg_r2.toFixed(2)}</span>
+                  <span className="text-xs font-bold text-[#00875A] font-mono">Mean R² Score</span>
+                </div>
+
+                <p className="text-xs sm:text-sm text-ink-700 leading-relaxed font-sans font-medium">
+                  LightGBM 24-hour horizon forecasting models evaluated on the held-out final 15% temporal test split for <strong>{activeCityKey}</strong> across all 24 forward hourly prediction steps.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5 pt-3 border-t border-slate-200/60 text-center font-mono">
+                <div className="p-2.5 rounded-2xl bg-white border border-slate-200/70 shadow-2xs">
+                  <span className="text-[10px] text-slate-400 uppercase block font-sans font-bold">Model MAE</span>
+                  <span className="text-xs font-extrabold text-ink-900">{cityMetrics.avg_mae} AQI</span>
+                </div>
+                <div className="p-2.5 rounded-2xl bg-white border border-slate-200/70 shadow-2xs">
+                  <span className="text-[10px] text-slate-400 uppercase block font-sans font-bold">Baseline MAE</span>
+                  <span className="text-xs font-extrabold text-ink-900">{cityMetrics.avg_baseline_mae} AQI</span>
+                </div>
+                <div className="p-2.5 rounded-2xl bg-white border border-slate-200/70 shadow-2xs">
+                  <span className="text-[10px] text-slate-400 uppercase block font-sans font-bold">vs Baseline</span>
+                  {/* improvement_pct is measured against naive persistence baseline (assuming AQI stays same as current hour) */}
+                  <span className="text-xs font-extrabold text-[#00875A]">+{cityMetrics.improvement_pct}%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Card B: Model Training & Architecture */}
+            <div className="p-6 sm:p-7 rounded-[28px] bg-slate-50/80 border border-slate-200/70 space-y-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono uppercase tracking-wider font-extrabold text-slate-400">
+                    Model Architecture
+                  </span>
+                  <span className="text-xs font-bold text-ink-900 bg-brand-peach/50 px-3 py-1 rounded-full font-mono border border-brand-peach">
+                    8 Cities Trained
+                  </span>
+                </div>
+
+                <div className="my-3 flex items-baseline gap-2">
+                  <span className="text-5xl font-black font-sans text-ink-900">24</span>
+                  <span className="text-xs font-bold text-accent font-mono">Horizons (h=1..24)</span>
+                </div>
+
+                <p className="text-xs sm:text-sm text-ink-700 leading-relaxed font-sans font-medium">
+                  Independent LightGBM regressors trained for each forecast hour using historical Open-Meteo air quality and weather archives (2023–present, ~25,000+ hourly records per city).
+                </p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5 pt-3 border-t border-slate-200/60 text-center font-mono">
+                <div className="p-2.5 rounded-2xl bg-white border border-slate-200/70 shadow-2xs">
+                  <span className="text-[10px] text-slate-400 uppercase block font-sans font-bold">Algorithm</span>
+                  <span className="text-xs font-extrabold text-ink-900">LightGBM</span>
+                </div>
+                <div className="p-2.5 rounded-2xl bg-white border border-slate-200/70 shadow-2xs">
+                  <span className="text-[10px] text-slate-400 uppercase block font-sans font-bold">Training Data</span>
+                  <span className="text-xs font-extrabold text-ink-900">2023–Present</span>
+                </div>
+                <div className="p-2.5 rounded-2xl bg-white border border-slate-200/70 shadow-2xs">
+                  <span className="text-[10px] text-slate-400 uppercase block font-sans font-bold">Split</span>
+                  <span className="text-xs font-extrabold text-[#00875A]">85% / 15%</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        )}
 
       </div>
 
@@ -404,55 +562,55 @@ export default function ForecastView({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         
         {/* Card 1: Today's Peak Risk Window */}
-        <div className="p-6 rounded-[28px] bg-white border border-slate-200 shadow-xs flex items-center justify-between">
+        <div className="p-6 rounded-[28px] bg-white border border-slate-100 shadow-soft flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wide block font-mono">
               Peak Danger Window
             </span>
             <h4 className="text-2xl font-black text-[#DC2626] font-sans">
-              08:00 AM - 09:30 AM
+              {isLoadingForecast ? 'Calculating...' : (peakSlot ? peakSlot.time : 'N/A')}
             </h4>
             <p className="text-xs text-slate-500 font-medium">
-              Forecasted AQI 325 • Inversion Ceiling drops to 175m
+              {isLoadingForecast ? 'Analyzing forward trajectory...' : peakSlot ? `Forecasted AQI ${peakSlot.aqi} • Higher particulate concentration` : 'Forecast pending'}
             </p>
           </div>
           <div className="w-14 h-14 rounded-2xl bg-[#DC2626]/10 text-[#DC2626] flex items-center justify-center flex-shrink-0">
-            <AlertTriangle className="w-7 h-7" />
+            {isLoadingForecast ? <Loader2 className="w-7 h-7 animate-spin" /> : <AlertTriangle className="w-7 h-7" />}
           </div>
         </div>
 
         {/* Card 2: Golden Outdoor Window (Picnics & Exercise) */}
-        <div className="p-6 rounded-[28px] bg-white border border-slate-200 shadow-xs flex items-center justify-between">
+        <div className="p-6 rounded-[28px] bg-white border border-slate-100 shadow-soft flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wide block font-mono">
               Optimal Clean Air Window
             </span>
-            <h4 className="text-2xl font-black text-[#00B37E] font-sans">
-              01:30 PM - 03:30 PM
+            <h4 className="text-2xl font-black text-[#00875A] font-sans">
+              {isLoadingForecast ? 'Calculating...' : (cleanSlot ? cleanSlot.time : 'N/A')}
             </h4>
             <p className="text-xs text-slate-500 font-medium">
-              Forecasted AQI 65 • Perfect for park outings & fresh air
+              {isLoadingForecast ? 'Locating best outdoor window...' : cleanSlot ? `Forecasted AQI ${cleanSlot.aqi} • Cleanest air window for outdoor plans` : 'Forecast pending'}
             </p>
           </div>
-          <div className="w-14 h-14 rounded-2xl bg-[#00B37E]/10 text-[#00B37E] flex items-center justify-center flex-shrink-0">
-            <CheckCircle2 className="w-7 h-7" />
+          <div className="w-14 h-14 rounded-2xl bg-[#00875A]/10 text-[#00875A] flex items-center justify-center flex-shrink-0">
+            {isLoadingForecast ? <Loader2 className="w-7 h-7 animate-spin" /> : <CheckCircle2 className="w-7 h-7" />}
           </div>
         </div>
 
         {/* Card 3: Boundary Layer Mixing Status */}
-        <div className="p-6 rounded-[28px] bg-white border border-slate-200 shadow-xs flex items-center justify-between">
+        <div className="p-6 rounded-[28px] bg-white border border-slate-100 shadow-soft flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wide block font-mono">
               Atmospheric Lift Status
             </span>
-            <h4 className="text-2xl font-black text-slate-900 font-sans">
-              1,100m Convective
+            <h4 className="text-2xl font-black text-ink-900 font-sans">
+              {gpsData.windSpeed && gpsData.windSpeed !== 'N/A' ? `${gpsData.windSpeed} Flow` : 'Convective Lift'}
             </h4>
             <p className="text-xs text-slate-500 font-medium">
-              SE Wind 6-12 km/h clearing morning traffic accumulation
+              {gpsData.windDir && gpsData.windDir !== 'N/A' ? `Wind direction: ${gpsData.windDir}` : 'Standard convective boundary layer mixing'}
             </p>
           </div>
-          <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+          <div className="w-14 h-14 rounded-2xl bg-brand-teal/20 text-teal-800 flex items-center justify-center flex-shrink-0">
             <Wind className="w-7 h-7" />
           </div>
         </div>
@@ -460,117 +618,161 @@ export default function ForecastView({
       </div>
 
       {/* 3. 6-SLOT DETAILED 24-HOUR PREDICTIVE TIMELINE (Clean White Cards with 4-Color Accents) */}
-      <div className="p-8 sm:p-9 rounded-[36px] bg-white border border-slate-200 shadow-sm space-y-6">
+      <div className="p-5 sm:p-8 lg:p-9 rounded-[28px] sm:rounded-[36px] bg-white border border-slate-100 shadow-soft space-y-6">
         
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-100">
           <div>
-            <h3 className="text-base sm:text-lg font-black text-slate-900 font-sans flex items-center gap-2.5">
-              <Clock className="w-5 h-5 text-[#00B37E]" />
-              24-Hour Forward Predictive Trajectory for Your Location
+            <h3 className="text-base sm:text-lg font-black text-ink-900 font-sans flex items-center gap-2.5">
+              <Clock className="w-5 h-5 text-accent" />
+              24-Hour Forward Predictive Trajectory for {gpsData.name}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Physics-Informed Neural Network (PINN) downscaling combining ECMWF winds, boundary layer physics & CPCB sensors
+              LightGBM predictive models combining hourly weather and multi-horizon AQI forecasts
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs font-mono text-slate-500">
-            <span className="inline-block w-2 h-2 rounded-full bg-[#00B37E] animate-pulse" />
-            <span>250m Resolution Active</span>
+            <span className="inline-block w-2 h-2 rounded-full bg-[#00875A] animate-pulse" />
+            <span>Location-Specific Forecast Active</span>
           </div>
         </div>
 
-        {/* 6 Time Slots Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
-          {forecastSlots.map((slot, index) => {
-            const isGood = slot.severity === 'good';
-            const isSevere = slot.severity === 'severe';
-            const slotColor = isGood ? '#00B37E' : isSevere ? '#DC2626' : '#F59E0B';
-
-            return (
-              <div 
-                key={index}
-                className={`p-5 rounded-[24px] border transition-all flex flex-col justify-between shadow-2xs hover:shadow-md ${
-                  isGood
-                    ? 'bg-[#F0FAF6] border-[#A7F3D0]'
-                    : isSevere
-                    ? 'bg-[#FFF5F5] border-[#FECACA]'
-                    : 'bg-[#FEFAF0] border-[#FDE68A]'
-                }`}
-              >
-                <div>
-                  {/* Time & Period Badge */}
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-black font-sans text-slate-900">
-                      {slot.label}
-                    </span>
-                    <span 
-                      className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full font-mono"
-                      style={{ 
-                        backgroundColor: `${slotColor}20`,
-                        color: slotColor 
-                      }}
-                    >
-                      {slot.period}
-                    </span>
-                  </div>
-
-                  {/* Big AQI Number */}
-                  <div className="my-2">
-                    <div className="flex items-baseline gap-1">
-                      <span 
-                        className="text-3xl font-black font-sans leading-none"
-                        style={{ color: slotColor }}
-                      >
-                        {slot.aqi}
-                      </span>
-                      <span className="text-[10px] font-bold text-slate-400 font-mono uppercase">AQI</span>
-                    </div>
-                    <span className="text-[11px] font-mono font-bold text-slate-600 block mt-1">
-                      PM2.5: {slot.pm25} µg/m³
-                    </span>
-                  </div>
-
-                  {/* Atmospheric Condition */}
-                  <div className="my-2.5 py-1.5 px-2 rounded-lg bg-white/70 border border-slate-200/50 text-[10px] font-mono text-slate-700">
-                    <div className="truncate font-semibold">{slot.condition}</div>
-                    <div className="text-slate-500 text-[9px] truncate">{slot.inversion} • {slot.wind}</div>
-                  </div>
-                </div>
-
-                {/* Citizen Tip */}
-                <div className="pt-2.5 mt-2 border-t border-slate-200/60">
-                  <p className="text-[11px] text-slate-700 font-medium leading-snug">
-                    {slot.tip}
-                  </p>
-                </div>
+        {/* Loading Skeleton */}
+        {isLoadingForecast && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="p-5 rounded-[24px] border border-slate-200 bg-slate-50 animate-pulse space-y-3">
+                <div className="h-4 bg-slate-200 rounded-md w-1/2"></div>
+                <div className="h-8 bg-slate-200 rounded-md w-3/4"></div>
+                <div className="h-3 bg-slate-200 rounded-md w-full"></div>
+                <div className="h-10 bg-slate-200 rounded-lg"></div>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )}
+
+        {/* Error State with Retry */}
+        {!isLoadingForecast && forecastError && (
+          <div className="p-6 rounded-[24px] bg-rose-50 border border-rose-200 text-rose-900 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="w-6 h-6 text-[#DC2626] flex-shrink-0" />
+              <div>
+                <p className="text-sm font-bold text-slate-900">Forecast not available for this location</p>
+                <p className="text-xs text-slate-600 mt-0.5">{forecastError}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => fetchForecast(gpsData?.lat, gpsData?.lng)}
+              className="px-4 py-2.5 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer shadow-xs active:scale-95"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Retry Forecast</span>
+            </button>
+          </div>
+        )}
+
+        {/* Empty state when no forecast hours */}
+        {!isLoadingForecast && !forecastError && forecastSlots.length === 0 && (
+          <div className="p-8 text-center text-slate-500 font-sans">
+            <p className="text-sm font-semibold">Forecast not available for this location</p>
+            <p className="text-xs mt-1">Try selecting another nearby area or recalibrating GPS.</p>
+          </div>
+        )}
+
+        {/* 6 Time Slots Grid */}
+        {!isLoadingForecast && !forecastError && forecastSlots.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+            {forecastSlots.map((slot, index) => {
+              const isGood = slot.severity === 'good';
+              const isSevere = slot.severity === 'severe';
+              const slotColor = isGood ? '#00875A' : isSevere ? '#DC2626' : '#B45309';
+
+              return (
+                <div 
+                  key={index}
+                  className={`p-5 rounded-[24px] border transition-all flex flex-col justify-between shadow-2xs hover:shadow-soft ${
+                    isGood
+                      ? 'bg-[#F0FAF6] border-[#A7F3D0]'
+                      : isSevere
+                      ? 'bg-[#FFF5F5] border-[#FECACA]'
+                      : 'bg-[#FEFAF0] border-[#FDE68A]'
+                  }`}
+                >
+                  <div>
+                    {/* Time & Period Badge */}
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-black font-sans text-ink-900">
+                        {slot.label}
+                      </span>
+                      <span 
+                        className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full font-mono"
+                        style={{ 
+                          backgroundColor: `${slotColor}18`,
+                          color: slotColor 
+                        }}
+                      >
+                        {slot.period}
+                      </span>
+                    </div>
+
+                    {/* Big AQI Number */}
+                    <div className="my-2">
+                      <div className="flex items-baseline gap-1">
+                        <span 
+                          className="text-3xl font-black font-sans leading-none"
+                          style={{ color: slotColor }}
+                        >
+                          {slot.aqi}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-400 font-mono uppercase">AQI</span>
+                      </div>
+                      <span className="text-[11px] font-mono font-bold text-slate-600 block mt-1">
+                        PM2.5: {slot.pm25} µg/m³
+                      </span>
+                    </div>
+
+                    {/* Atmospheric Condition */}
+                    <div className="my-2.5 py-1.5 px-2 rounded-xl bg-white/80 border border-slate-200/50 text-[10px] font-mono text-slate-700">
+                      <div className="truncate font-semibold">{slot.condition}</div>
+                      <div className="text-slate-500 text-[9px] truncate">{slot.inversion} • {slot.wind}</div>
+                    </div>
+                  </div>
+
+                  {/* Citizen Tip */}
+                  <div className="pt-2.5 mt-2 border-t border-slate-200/60">
+                    <p className="text-[11px] text-slate-700 font-medium leading-snug">
+                      {slot.tip}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
       </div>
 
       {/* 4. DOWNWIND DRIFT & CITIZEN ADVISORY DETAILS (Clean White Card) */}
-      <div className="p-7 sm:p-8 rounded-[32px] bg-white border border-slate-200 shadow-sm space-y-4">
-        <h4 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider font-mono flex items-center gap-2">
-          <Compass className="w-4 h-4 text-[#00B37E]" />
+      <div className="p-7 sm:p-8 rounded-[28px] sm:rounded-[36px] bg-white border border-slate-100 shadow-soft space-y-4">
+        <h4 className="text-sm font-extrabold text-ink-900 uppercase tracking-wider font-mono flex items-center gap-2">
+          <Compass className="w-4 h-4 text-accent" />
           Downwind Atmospheric Dynamics Impacting Your Location ({gpsData.name})
         </h4>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
           
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1.5">
+          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-1.5">
             <div className="flex items-center gap-2 text-xs font-bold text-[#DC2626]">
               <span className="w-2 h-2 rounded-full bg-[#DC2626]" />
               <span>Morning Inversion Ceiling (07:30 - 09:30 AM)</span>
             </div>
             <p className="text-xs text-slate-600 leading-relaxed font-sans">
-              Surface cooling traps diesel freight and manufacturing exhaust arriving from the Partapur industrial expressway link under a shallow 175m lid. <strong>Recommendation:</strong> Delay outdoor jogs and keep home windows tightly sealed.
+              Surface cooling traps diesel freight and vehicle exhaust arriving from arterial transit corridors under a shallow lid. <strong>Recommendation:</strong> Delay outdoor jogs and keep home windows tightly sealed.
             </p>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1.5">
-            <div className="flex items-center gap-2 text-xs font-bold text-[#00B37E]">
-              <span className="w-2 h-2 rounded-full bg-[#00B37E]" />
+          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-1.5">
+            <div className="flex items-center gap-2 text-xs font-bold text-[#00875A]">
+              <span className="w-2 h-2 rounded-full bg-[#00875A]" />
               <span>Afternoon Solar Dispersion (01:00 - 03:30 PM)</span>
             </div>
             <p className="text-xs text-slate-600 leading-relaxed font-sans">
@@ -578,9 +780,9 @@ export default function ForecastView({
             </p>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1.5">
-            <div className="flex items-center gap-2 text-xs font-bold text-[#F59E0B]">
-              <span className="w-2 h-2 rounded-full bg-[#F59E0B]" />
+          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-1.5">
+            <div className="flex items-center gap-2 text-xs font-bold text-[#B45309]">
+              <span className="w-2 h-2 rounded-full bg-[#B45309]" />
               <span>Evening Peak Traffic Inrush (06:00 - 08:30 PM)</span>
             </div>
             <p className="text-xs text-slate-600 leading-relaxed font-sans">

@@ -15,6 +15,15 @@ import {
 } from 'lucide-react';
 import { getNationalAnalytics, classifyAqi } from '../lib/api';
 
+function formatTimeAgo(timestamp) {
+  if (!timestamp) return 'recently';
+  const diffMs = Date.now() - timestamp;
+  const mins = Math.max(1, Math.round(diffMs / 60000));
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+}
+
 export default function AnalyticsView({ currentLocation }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -25,19 +34,21 @@ export default function AnalyticsView({ currentLocation }) {
   const [testResult, setTestResult] = useState(null);
   const [isClassifying, setIsClassifying] = useState(false);
 
-  useEffect(() => {
-    async function loadAnalytics() {
-      try {
-        setLoading(true);
-        const res = await getNationalAnalytics();
-        setData(res);
-      } catch (err) {
-        console.error('Failed to load national analytics:', err);
-        setError('Could not connect to national analytics service.');
-      } finally {
-        setLoading(false);
-      }
+  const loadAnalytics = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await getNationalAnalytics();
+      setData(res);
+    } catch (err) {
+      console.error('Failed to load national analytics:', err);
+      setError(err.message || 'Could not connect to national analytics service.');
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
     loadAnalytics();
   }, []);
 
@@ -112,10 +123,16 @@ export default function AnalyticsView({ currentLocation }) {
 
   if (error || !data) {
     return (
-      <div className="p-8 rounded-2xl bg-white border border-slate-200 text-center space-y-3 max-w-xl mx-auto">
+      <div className="p-8 rounded-2xl bg-white border border-slate-200 text-center space-y-4 max-w-xl mx-auto shadow-xs">
         <AlertTriangle className="w-8 h-8 text-amber-500 mx-auto" />
         <h4 className="text-sm font-bold text-slate-800">Analytics Offline</h4>
         <p className="text-xs text-slate-500 font-sans">{error || 'Please run train_kaggle.py to initialize analytics.'}</p>
+        <button
+          onClick={loadAnalytics}
+          className="px-4 py-2 rounded-xl bg-[#00B37E] hover:bg-[#009B6D] text-white text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -126,74 +143,80 @@ export default function AnalyticsView({ currentLocation }) {
     <div className="space-y-6 max-w-6xl mx-auto animate-in fade-in duration-200 pb-12">
       
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="text-xl sm:text-2xl font-black text-slate-900 font-sans">
+            <h3 className="text-xl sm:text-2xl font-black text-ink-900 font-sans">
               National Air Quality Intelligence & EDA
             </h3>
-            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#00B37E]/15 text-[#00B37E]">
+            <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-lime/40 text-ink-900 border border-lime/60">
               Kaggle Pipeline Live
             </span>
+            {data?.stale && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 border border-amber-200 text-amber-800 font-mono">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                Offline: data saved {formatTimeAgo(data.savedAt)}
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-500 font-sans mt-0.5">
             Synthesized from 235,785+ daily ground monitoring records across India (2023–2025) & Random Forest Classifier
           </p>
         </div>
 
-        <div className="flex items-center gap-2 text-xs font-mono bg-white px-3.5 py-2 rounded-xl border border-slate-200 shadow-2xs">
-          <Database className="w-3.5 h-3.5 text-[#00B37E]" />
-          <span className="text-slate-600 font-semibold">{total_records.toLocaleString()} Records</span>
+        <div className="flex items-center gap-2 text-xs font-mono bg-white px-4 py-2 rounded-full border border-slate-200/80 shadow-2xs">
+          <Database className="w-3.5 h-3.5 text-accent" />
+          <span className="text-ink-900 font-semibold">{total_records.toLocaleString()} Records</span>
         </div>
       </div>
 
       {/* Top 4 Key Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         
-        <div className="p-4 rounded-2xl bg-white border border-slate-200/90 shadow-2xs">
+        <div className="p-5 rounded-[26px] bg-white border border-slate-100 shadow-soft">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-[11px] font-bold uppercase font-mono tracking-wider">Trained Model</span>
-            <Cpu className="w-4 h-4 text-[#00B37E]" />
+            <Cpu className="w-4 h-4 text-accent" />
           </div>
-          <p className="text-lg sm:text-xl font-black text-slate-900 font-mono">Random Forest</p>
-          <p className="text-[11px] text-[#00B37E] font-medium mt-1">100 Trees • {model_accuracy}% Test Acc</p>
+          <p className="text-lg sm:text-xl font-black text-ink-900 font-mono">Random Forest</p>
+          <p className="text-[11px] text-[#00875A] font-semibold mt-1">100 Trees • {model_accuracy}% Test Acc</p>
         </div>
 
-        <div className="p-4 rounded-2xl bg-white border border-slate-200/90 shadow-2xs">
+        <div className="p-5 rounded-[26px] bg-white border border-slate-100 shadow-soft">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-[11px] font-bold uppercase font-mono tracking-wider">Top Dominant Pollutant</span>
-            <Activity className="w-4 h-4 text-amber-500" />
+            <Activity className="w-4 h-4 text-[#B45309]" />
           </div>
-          <p className="text-lg sm:text-xl font-black text-slate-900 font-mono">PM10 (49.6%)</p>
+          <p className="text-lg sm:text-xl font-black text-ink-900 font-mono">PM10 (49.6%)</p>
           <p className="text-[11px] text-slate-500 mt-1">Followed by PM2.5 (26.7%)</p>
         </div>
 
-        <div className="p-4 rounded-2xl bg-white border border-slate-200/90 shadow-2xs">
+        <div className="p-5 rounded-[26px] bg-white border border-slate-100 shadow-soft">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-[11px] font-bold uppercase font-mono tracking-wider">Dominant Status</span>
-            <ShieldCheck className="w-4 h-4 text-emerald-500" />
+            <ShieldCheck className="w-4 h-4 text-[#00875A]" />
           </div>
-          <p className="text-lg sm:text-xl font-black text-slate-900 font-mono">Satisfactory</p>
+          <p className="text-lg sm:text-xl font-black text-ink-900 font-mono">Satisfactory</p>
           <p className="text-[11px] text-slate-500 mt-1">37.7% of all recorded days</p>
         </div>
 
-        <div className="p-4 rounded-2xl bg-white border border-slate-200/90 shadow-2xs">
+        <div className="p-5 rounded-[26px] bg-white border border-slate-100 shadow-soft">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-[11px] font-bold uppercase font-mono tracking-wider">Severe Inversion Risk</span>
-            <AlertTriangle className="w-4 h-4 text-red-500" />
+            <AlertTriangle className="w-4 h-4 text-[#DC2626]" />
           </div>
-          <p className="text-lg sm:text-xl font-black text-red-600 font-mono">0.2% Severe Days</p>
+          <p className="text-lg sm:text-xl font-black text-[#DC2626] font-mono">0.2% Severe Days</p>
           <p className="text-[11px] text-slate-500 mt-1">Winter season atmospheric traps</p>
         </div>
 
       </div>
 
       {/* Row 2: Interactive Model Classifier Playground */}
-      <div className="p-5 sm:p-6 rounded-3xl bg-white border border-slate-200 shadow-2xs space-y-4">
+      <div className="p-6 sm:p-7 rounded-[32px] bg-white border border-slate-100 shadow-soft space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <h4 className="text-sm font-bold text-slate-900 font-sans flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-[#00B37E]" />
+            <h4 className="text-sm font-bold text-ink-900 font-sans flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-accent" />
               Interactive Random Forest Status Classifier (Trained from Kaggle)
             </h4>
             <p className="text-xs text-slate-500">
@@ -207,10 +230,10 @@ export default function AnalyticsView({ currentLocation }) {
               <button
                 key={v}
                 onClick={() => setTestAqi(v)}
-                className={`text-[11px] font-mono px-2 py-0.5 rounded-lg border transition-all cursor-pointer ${
+                className={`text-[11px] font-mono px-2.5 py-1 rounded-xl border transition-all cursor-pointer ${
                   testAqi === v
-                    ? 'bg-[#00B37E] text-white border-[#00B37E]'
-                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-[#00B37E]'
+                    ? 'bg-ink-900 text-white border-ink-900 shadow-2xs'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-ink-900'
                 }`}
               >
                 {v}
@@ -231,7 +254,7 @@ export default function AnalyticsView({ currentLocation }) {
                 max="500"
                 value={testAqi}
                 onChange={(e) => setTestAqi(Number(e.target.value))}
-                className="w-20 px-2.5 py-1 text-center font-mono font-bold rounded-lg border border-slate-300 focus:outline-none focus:border-[#00B37E]"
+                className="w-20 px-2.5 py-1 text-center font-mono font-bold rounded-xl border border-slate-200 focus:outline-none focus:border-accent"
               />
             </div>
             <input
@@ -240,7 +263,7 @@ export default function AnalyticsView({ currentLocation }) {
               max="500"
               value={testAqi}
               onChange={(e) => setTestAqi(Number(e.target.value))}
-              className="w-full accent-[#00B37E] cursor-pointer"
+              className="w-full accent-accent cursor-pointer"
             />
             <div className="flex justify-between text-[10px] font-mono text-slate-400">
               <span>0 (Good)</span>
@@ -251,7 +274,7 @@ export default function AnalyticsView({ currentLocation }) {
           </div>
 
           {/* Model Decision Badge */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-center items-center text-center">
+          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col justify-center items-center text-center">
             <span className="text-[11px] font-bold uppercase font-mono text-slate-400 tracking-wider">
               Predicted Category
             </span>
@@ -259,7 +282,7 @@ export default function AnalyticsView({ currentLocation }) {
               {isClassifying ? (
                 <span className="text-xs font-mono text-slate-400">Classifying...</span>
               ) : testResult ? (
-                <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold border mt-1 ${getStatusColor(testResult.status)}`}>
+                <span className={`inline-block px-3.5 py-1 rounded-full text-xs font-bold border mt-1 ${getStatusColor(testResult.status)}`}>
                   {testResult.status} ({testResult.confidence}%)
                 </span>
               ) : null}
@@ -293,10 +316,10 @@ export default function AnalyticsView({ currentLocation }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         
         {/* Status Breakdown from EDA */}
-        <div className="p-5 sm:p-6 rounded-3xl bg-white border border-slate-200 shadow-2xs space-y-4">
+        <div className="p-6 sm:p-7 rounded-[32px] bg-white border border-slate-100 shadow-soft space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h4 className="text-sm font-bold text-slate-900 font-sans">National Status Distribution</h4>
+              <h4 className="text-sm font-bold text-ink-900 font-sans">National Status Distribution</h4>
               <p className="text-xs text-slate-500">2023–2025 ground sensor category proportions</p>
             </div>
             <Layers className="w-4 h-4 text-slate-400" />
@@ -323,10 +346,10 @@ export default function AnalyticsView({ currentLocation }) {
         </div>
 
         {/* Prominent Pollutants Breakdown from EDA */}
-        <div className="p-5 sm:p-6 rounded-3xl bg-white border border-slate-200 shadow-2xs space-y-4">
+        <div className="p-6 sm:p-7 rounded-[32px] bg-white border border-slate-100 shadow-soft space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h4 className="text-sm font-bold text-slate-900 font-sans">Prominent Pollutants</h4>
+              <h4 className="text-sm font-bold text-ink-900 font-sans">Prominent Pollutants</h4>
               <p className="text-xs text-slate-500">Primary air quality drivers reported across India</p>
             </div>
             <Activity className="w-4 h-4 text-slate-400" />
@@ -343,7 +366,7 @@ export default function AnalyticsView({ currentLocation }) {
                 </div>
                 <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden">
                   <div
-                    className="h-full bg-slate-800 rounded-full"
+                    className="h-full bg-ink-900 rounded-full"
                     style={{ width: `${item.percentage}%` }}
                   />
                 </div>
@@ -354,22 +377,28 @@ export default function AnalyticsView({ currentLocation }) {
 
       </div>
 
-      {/* Row 4: Multi-City 2-Year Benchmark Comparison Table */}
-      <div className="p-5 sm:p-6 rounded-3xl bg-white border border-slate-200 shadow-2xs space-y-4 overflow-hidden">
-        <div>
-          <h4 className="text-sm font-bold text-slate-900 font-sans">
-            Multi-City Historical Benchmarks (Kaggle Ground Sensor Dataset)
-          </h4>
-          <p className="text-xs text-slate-500">
-            Official historical telemetry statistics for key Northern India & NCR airsheds
-          </p>
+      {/* Row 4: Top 10 Most Polluted Cities Benchmark Comparison Table */}
+      <div className="p-6 sm:p-7 rounded-[32px] bg-white border border-slate-100 shadow-soft space-y-4 overflow-hidden">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h4 className="text-sm font-bold text-ink-900 font-sans flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
+              Top 10 Most Polluted Cities in India (Kaggle Ground Sensor Dataset)
+            </h4>
+            <p className="text-xs text-slate-500">
+              Ranked by 2-year average AQI across official historical ground sensor monitoring stations
+            </p>
+          </div>
+          <span className="text-[11px] font-mono text-slate-400 font-bold px-2.5 py-1 rounded-full bg-slate-100 self-start sm:self-auto">
+            Top 10 of {Object.keys(city_benchmarks || {}).length} Airsheds
+          </span>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs font-sans">
             <thead className="bg-slate-50 text-slate-500 font-mono text-[11px] uppercase tracking-wider border-y border-slate-200">
               <tr>
-                <th className="py-2.5 px-3">City / Airshed</th>
+                <th className="py-2.5 px-3">Rank & City</th>
                 <th className="py-2.5 px-3">Records Analyzed</th>
                 <th className="py-2.5 px-3">2-Year Avg AQI</th>
                 <th className="py-2.5 px-3">Historical Min - Max</th>
@@ -378,38 +407,51 @@ export default function AnalyticsView({ currentLocation }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {Object.entries(city_benchmarks).map(([city, bench]) => (
-                <tr key={city} className={`hover:bg-slate-50/80 transition-colors ${city === 'Meerut' ? 'bg-[#00B37E]/5' : ''}`}>
-                  <td className="py-3 px-3 font-bold text-slate-900 flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-[#00B37E]" />
-                    <span>{city}</span>
-                    {city === 'Meerut' && (
-                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#00B37E] text-white">
-                        Home City
+              {Object.entries(city_benchmarks || {})
+                .sort(([, a], [, b]) => (b.avg_aqi || 0) - (a.avg_aqi || 0))
+                .slice(0, 10)
+                .map(([city, bench], idx) => (
+                  <tr key={city} className={`hover:bg-slate-50/80 transition-colors ${idx < 3 ? 'bg-red-50/20' : ''}`}>
+                    <td className="py-3 px-3 font-bold text-ink-900 flex items-center gap-2">
+                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono font-black ${
+                        idx === 0 
+                          ? 'bg-red-600 text-white' 
+                          : idx === 1 
+                          ? 'bg-red-500 text-white' 
+                          : idx === 2 
+                          ? 'bg-orange-500 text-white' 
+                          : 'bg-slate-200 text-slate-700'
+                      }`}>
+                        #{idx + 1}
                       </span>
-                    )}
-                  </td>
-                  <td className="py-3 px-3 font-mono text-slate-600">{bench.records.toLocaleString()}</td>
-                  <td className="py-3 px-3 font-mono font-bold text-slate-900">
-                    <span className={`px-2 py-0.5 rounded-lg border ${
-                      bench.avg_aqi > 180 ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                    }`}>
-                      AQI {bench.avg_aqi}
-                    </span>
-                  </td>
-                  <td className="py-3 px-3 font-mono text-slate-600">{bench.min_aqi} – {bench.max_aqi}</td>
-                  <td className="py-3 px-3 font-mono font-semibold text-slate-800">{bench.dominant_pollutant}</td>
-                  <td className="py-3 px-3">
-                    <div className="flex gap-1">
-                      {Object.entries(bench.status_breakdown).slice(0, 3).map(([st, cnt]) => (
-                        <span key={st} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono">
-                          {st}: {cnt}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                      <MapPin className="w-3.5 h-3.5 text-accent" />
+                      <span className="text-sm">{city}</span>
+                    </td>
+                    <td className="py-3 px-3 font-mono text-slate-600">{bench.records.toLocaleString()}</td>
+                    <td className="py-3 px-3 font-mono font-bold text-ink-900">
+                      <span className={`px-2 py-0.5 rounded-lg border ${
+                        bench.avg_aqi > 200 
+                          ? 'bg-red-50 text-red-700 border-red-200' 
+                          : bench.avg_aqi > 180 
+                          ? 'bg-orange-50 text-orange-700 border-orange-200' 
+                          : 'bg-amber-50 text-amber-700 border-amber-200'
+                      }`}>
+                        AQI {bench.avg_aqi}
+                      </span>
+                    </td>
+                    <td className="py-3 px-3 font-mono text-slate-600">{bench.min_aqi} – {bench.max_aqi}</td>
+                    <td className="py-3 px-3 font-mono font-semibold text-slate-800">{bench.dominant_pollutant}</td>
+                    <td className="py-3 px-3">
+                      <div className="flex gap-1 flex-wrap">
+                        {Object.entries(bench.status_breakdown).slice(0, 3).map(([st, cnt]) => (
+                          <span key={st} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono">
+                            {st}: {cnt}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div>

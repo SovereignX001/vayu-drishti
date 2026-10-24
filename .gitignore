@@ -25,9 +25,15 @@ dist-ssr
 
 # Backend & Python
 backend/venv/
+backend/.venv/
+.venv/
 backend/.env
 __pycache__/
 *.py[cod]
 *$py.class
 .env
+
+# Dead code archives
+_removed/
+
 

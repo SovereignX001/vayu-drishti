@@ -8,21 +8,29 @@ import {
   X, 
   Sparkles,
   Loader2,
-  Check
+  Check,
+  AlertTriangle
 } from 'lucide-react';
 import { POPULAR_SEARCH_LOCATIONS } from '../data/airData';
+import { getLiveAqiByCoords } from '../lib/api';
 
 export default function LocationSearchBar({ 
   currentLocation, 
   onSelectLocation,
   onResetGps,
-  placeholder = "Search any location, neighborhood or landmark (linked to Google Maps)..."
+  placeholder = "Search any location in India...",
+  variant = 'pill'
 }) {
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
   const [onlineResults, setOnlineResults] = useState([]);
+  const [isFetchingTelemetry, setIsFetchingTelemetry] = useState(false);
+  const [telemetryError, setTelemetryError] = useState(null);
+  const [pendingLocation, setPendingLocation] = useState(null);
+
   const containerRef = useRef(null);
+  const abortControllerRef = useRef(null);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -46,7 +54,7 @@ export default function LocationSearchBar({
     );
   }).slice(0, 6);
 
-  // Debounced online geocoding search using open geocoder
+  // Debounced online geocoding search with AbortController cancellation
   useEffect(() => {
     if (!query.trim() || query.length < 3) {
       setOnlineResults([]);
@@ -54,53 +62,90 @@ export default function LocationSearchBar({
       return;
     }
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     const timer = setTimeout(async () => {
       setIsSearchingOnline(true);
       try {
         const res = await fetch(
           `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=in&limit=4`,
-          { headers: { 'Accept-Language': 'en' } }
+          {
+            headers: { 'Accept-Language': 'en' },
+            signal: controller.signal,
+          }
         );
         if (res.ok) {
           const data = await res.json();
           const parsed = data.map((item) => {
             const lat = parseFloat(item.lat);
             const lng = parseFloat(item.lon);
-            // Simulate downscaled AQI calculation from coordinates
-            const pseudoAqi = Math.round(90 + Math.abs(Math.sin(lat * 10) * 160));
             return {
               name: item.display_name.split(',')[0],
               city: item.display_name.split(',')[1]?.trim() || 'India',
               state: item.display_name.split(',')[2]?.trim() || '',
               lat: Number(lat.toFixed(4)),
               lng: Number(lng.toFixed(4)),
-              aqi: pseudoAqi,
-              pm25: Math.round(pseudoAqi * 0.8),
-              pm10: Math.round(pseudoAqi * 1.3),
-              station: `Ground Sensor Node [${lat.toFixed(2)}°N, ${lng.toFixed(2)}°E]`,
-              windSpeed: '7 km/h',
-              windDir: 'NW 315°',
-              inversionRisk: pseudoAqi > 200 ? 'High' : 'Moderate',
-              trafficDensity: '74%',
-              trafficStatus: 'Urban Flow'
             };
           });
           setOnlineResults(parsed);
         }
       } catch (e) {
-        console.log('Online geocode fallback:', e);
+        if (e.name !== 'AbortError') {
+          console.log('Online geocode fallback:', e);
+        }
       } finally {
-        setIsSearchingOnline(false);
+        if (!controller.signal.aborted) {
+          setIsSearchingOnline(false);
+        }
       }
-    }, 450);
+    }, 400);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [query]);
 
-  const handleSelect = (loc) => {
-    onSelectLocation(loc);
-    setQuery('');
-    setIsOpen(false);
+  const handleSelect = async (loc) => {
+    setPendingLocation(loc);
+    setIsFetchingTelemetry(true);
+    setTelemetryError(null);
+
+    try {
+      const live = await getLiveAqiByCoords(loc.lat, loc.lng);
+      const fullLoc = {
+        ...loc,
+        lat: loc.lat,
+        lng: loc.lng,
+        aqi: live.aqi,
+        pm25: live.pm25,
+        pm10: live.pm10,
+        no2: live.no2,
+        o3: live.o3,
+        so2: live.so2,
+        temp: live.temp,
+        humidity: live.humidity,
+        windSpeed: live.windSpeed != null ? `${live.windSpeed} km/h` : 'N/A',
+        windDir: live.windDir || 'N/A',
+        station: `Ground Sensor Node [${loc.lat.toFixed(2)}°N, ${loc.lng.toFixed(2)}°E]`,
+        syncTime: live.stale ? 'Offline Cache' : 'Live Telemetry Fix',
+        stale: Boolean(live.stale),
+        savedAt: live.savedAt,
+      };
+      onSelectLocation(fullLoc);
+      setQuery('');
+      setIsOpen(false);
+      setPendingLocation(null);
+    } catch (err) {
+      console.error('Failed to fetch live telemetry for selected location:', err);
+      setTelemetryError('Live data unavailable for this location.');
+    } finally {
+      setIsFetchingTelemetry(false);
+    }
   };
 
   // Google Maps Search URL
@@ -111,13 +156,12 @@ export default function LocationSearchBar({
   return (
     <div ref={containerRef} className="relative w-full">
       {/* Search Bar Input Container */}
-      <div className="flex items-center gap-2 p-2 bg-white rounded-2xl border border-slate-200 shadow-sm focus-within:border-[#00B37E] focus-within:ring-2 focus-within:ring-[#00B37E]/20 transition-all">
+      <div className={`flex items-center gap-2 transition-all ${
+        variant === 'pill'
+          ? 'px-4 py-2 bg-slate-100/90 hover:bg-white rounded-full border border-slate-200/80 shadow-2xs focus-within:bg-white focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20'
+          : 'p-2.5 bg-white rounded-3xl border border-slate-200/90 shadow-soft focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20'
+      }`}>
         
-        {/* Search Icon */}
-        <div className="pl-2 text-slate-400">
-          <Search className="w-4 h-4 text-[#00B37E]" />
-        </div>
-
         {/* Input */}
         <input
           type="text"
@@ -127,48 +171,97 @@ export default function LocationSearchBar({
             setIsOpen(true);
           }}
           onFocus={() => setIsOpen(true)}
-          placeholder={placeholder}
-          className="flex-1 py-1.5 text-xs sm:text-sm text-slate-800 placeholder-slate-400 outline-none bg-transparent font-medium"
+          placeholder={isFetchingTelemetry ? 'Fetching live telemetry for selected location...' : placeholder}
+          disabled={isFetchingTelemetry}
+          aria-label="Search city, neighborhood, or coordinates in India"
+          className="flex-1 py-1 text-xs sm:text-sm text-ink-900 placeholder-ink-400 outline-none bg-transparent font-medium disabled:opacity-60"
         />
 
         {/* Clear Button */}
-        {query && (
+        {query && !isFetchingTelemetry && (
           <button
+            type="button"
             onClick={() => {
               setQuery('');
               setOnlineResults([]);
             }}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+            aria-label="Clear search query"
+            title="Clear search query"
+            className="p-1 rounded-full text-ink-400 hover:text-ink-700 hover:bg-slate-200/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <X className="w-3.5 h-3.5" />
           </button>
         )}
 
-        {/* View on Google Maps Link Button */}
-        <a
-          href={gmapsUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all shadow-2xs hover:text-slate-900 flex-shrink-0"
-          title="Open this location in Google Maps"
-        >
-          <Navigation className="w-3.5 h-3.5 text-[#00B37E]" />
-          <span className="hidden sm:inline">Google Maps</span>
-          <ExternalLink className="w-3 h-3 text-slate-400" />
-        </a>
+        {/* Search Icon / Loading indicator on right like reference image */}
+        <div className="text-ink-400 flex items-center pr-1 flex-shrink-0">
+          {isFetchingTelemetry ? (
+            <Loader2 className="w-4 h-4 text-accent animate-spin" />
+          ) : (
+            <Search className="w-4 h-4 text-ink-400 hover:text-accent transition-colors" />
+          )}
+        </div>
+
+        {/* View on Google Maps Link Button (if card variant or non-compact) */}
+        {variant !== 'pill' && (
+          <a
+            href={gmapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open coordinates in Google Maps (opens in new tab)"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all shadow-2xs hover:text-slate-900 flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            title="Open this location in Google Maps"
+          >
+            <Navigation className="w-3.5 h-3.5 text-accent" />
+            <span className="hidden sm:inline">Google Maps</span>
+            <ExternalLink className="w-3 h-3 text-slate-400" />
+          </a>
+        )}
 
         {/* Reset / GPS Locate Me Button */}
         {onResetGps && (
           <button
+            type="button"
             onClick={onResetGps}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#00B37E]/10 hover:bg-[#00B37E]/20 text-[#00B37E] text-xs font-bold transition-all flex-shrink-0 cursor-pointer"
+            disabled={isFetchingTelemetry}
+            aria-label="Recalibrate and lock GPS position"
+            className="flex items-center gap-1 p-1.5 sm:px-2.5 sm:py-1 rounded-full bg-slate-200/70 hover:bg-accent/15 text-ink-600 hover:text-accent text-xs font-bold transition-all flex-shrink-0 cursor-pointer disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             title="Lock to Live GPS Location"
           >
-            <Crosshair className="w-3.5 h-3.5 animate-pulse" />
-            <span className="hidden md:inline">Live GPS</span>
+            <Crosshair className="w-3.5 h-3.5 text-accent animate-pulse" />
+            <span className="hidden lg:inline text-[11px]">GPS</span>
           </button>
         )}
       </div>
+
+      {/* Inline Telemetry Error with Retry */}
+      {telemetryError && (
+        <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-2xl flex items-center justify-between text-xs text-red-700 animate-in fade-in duration-150">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
+            <span>{telemetryError}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {pendingLocation && (
+              <button
+                type="button"
+                onClick={() => handleSelect(pendingLocation)}
+                className="px-3 py-1 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition-colors cursor-pointer text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+              >
+                Retry
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setTelemetryError(null)}
+              aria-label="Dismiss error notice"
+              className="p-1 hover:bg-red-100 rounded text-red-500 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Autocomplete Dropdown Results */}
       {isOpen && (
@@ -178,7 +271,7 @@ export default function LocationSearchBar({
           <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-[11px] font-mono text-slate-500">
             <span className="font-bold flex items-center gap-1.5">
               <Sparkles className="w-3 h-3 text-[#00B37E]" />
-              Search Results & Instant Google Maps Locations
+              Search Results & Instant Locations
             </span>
             {isSearchingOnline && (
               <span className="flex items-center gap-1 text-[#00B37E]">
@@ -198,7 +291,8 @@ export default function LocationSearchBar({
                 <button
                   key={`curated-${i}`}
                   onClick={() => handleSelect(loc)}
-                  className={`w-full p-2.5 rounded-xl text-left flex items-center justify-between gap-3 transition-colors cursor-pointer group ${
+                  disabled={isFetchingTelemetry}
+                  className={`w-full p-2.5 rounded-xl text-left flex items-center justify-between gap-3 transition-colors cursor-pointer group disabled:opacity-50 ${
                     isSelected ? 'bg-[#00B37E]/10 border border-[#00B37E]/30' : 'hover:bg-slate-50'
                   }`}
                 >
@@ -231,13 +325,12 @@ export default function LocationSearchBar({
 
             {/* Dynamic Online Geocoder Results */}
             {onlineResults.map((loc, i) => {
-              const aqiColor = loc.aqi <= 70 ? '#00B37E' : loc.aqi <= 150 ? '#F59E0B' : '#DC2626';
-
               return (
                 <button
                   key={`online-${i}`}
                   onClick={() => handleSelect(loc)}
-                  className="w-full p-2.5 rounded-xl text-left flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors cursor-pointer group border-t border-slate-100"
+                  disabled={isFetchingTelemetry}
+                  className="w-full p-2.5 rounded-xl text-left flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors cursor-pointer group border-t border-slate-100 disabled:opacity-50"
                 >
                   <div className="flex items-center gap-2.5 truncate">
                     <div className="w-7 h-7 rounded-lg bg-[#00B37E]/10 text-[#00B37E] flex items-center justify-center flex-shrink-0">
@@ -253,11 +346,8 @@ export default function LocationSearchBar({
                     </div>
                   </div>
 
-                  <span 
-                    className="text-xs font-bold px-2 py-0.5 rounded font-mono flex-shrink-0"
-                    style={{ color: aqiColor, backgroundColor: `${aqiColor}18` }}
-                  >
-                    Est. AQI {loc.aqi}
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded font-mono flex-shrink-0 text-[#00B37E] bg-[#00B37E]/10">
+                    Select for Live AQI
                   </span>
                 </button>
               );

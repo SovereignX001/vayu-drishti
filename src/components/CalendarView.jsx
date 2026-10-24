@@ -43,13 +43,18 @@ export default function CalendarView({ onTriggerAlert, alertState }) {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+      <div className="flex items-center justify-between pb-3 border-b border-slate-200/80">
         <div>
-          <h3 className="text-xl font-black text-slate-900">
-            Meerut Daily Activity & Outing Planner
-          </h3>
-          <p className="text-xs text-slate-500">
-            Hyper-local downscaled safe windows for citizen commute, picnics, and exercise across Meerut
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h3 className="text-xl font-black text-ink-900 font-sans">
+              Meerut Daily Activity & Outing Planner
+            </h3>
+            <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 border border-amber-300">
+              Sample schedule
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Location-specific safe windows for citizen commute, picnics, and exercise across your region
           </p>
           <p className="text-xs text-slate-500">
             Smart air quality scheduling for picnics, morning runs, commutes, and outdoor plans
@@ -57,18 +62,18 @@ export default function CalendarView({ onTriggerAlert, alertState }) {
         </div>
       </div>
 
-      <div className="space-y-3.5">
+      <div className="space-y-4">
         {events.map((ev, i) => {
           const Icon = ev.icon;
           return (
             <div 
               key={i}
-              className={`p-5 rounded-[26px] border transition-all ${
+              className={`p-6 rounded-[28px] border transition-all shadow-soft hover:shadow-md ${
                 ev.severity === 'severe'
                   ? 'bg-[#FFF5F5] border-[#FECACA]'
                   : ev.severity === 'good'
                   ? 'bg-[#F0FAF6] border-[#A7F3D0]'
-                  : 'bg-white border-slate-200/90 shadow-xs'
+                  : 'bg-white border-slate-100'
               }`}
             >
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -77,7 +82,7 @@ export default function CalendarView({ onTriggerAlert, alertState }) {
                     ev.severity === 'severe'
                       ? 'bg-[#FDECEC] text-[#DC2626]'
                       : ev.severity === 'good'
-                      ? 'bg-[#D7F5E9] text-[#00B37E]'
+                      ? 'bg-lime/30 text-ink-900'
                       : 'bg-slate-100 text-slate-700'
                   }`}>
                     <Icon className="w-6 h-6" />
@@ -85,22 +90,22 @@ export default function CalendarView({ onTriggerAlert, alertState }) {
 
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono font-bold text-slate-700 flex items-center gap-1">
+                      <span className="text-xs font-mono font-bold text-slate-700 flex items-center gap-1.5 bg-white/70 px-2.5 py-0.5 rounded-full border border-slate-200/50">
                         <Clock className="w-3.5 h-3.5 text-slate-400" />
                         {ev.time}
                       </span>
-                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                      <span className={`text-[10px] font-mono px-2.5 py-0.5 rounded-full font-bold ${
                         ev.severity === 'severe' 
                           ? 'bg-[#FEE2E2] text-[#DC2626]' 
                           : ev.severity === 'good'
-                          ? 'bg-[#D1F2E5] text-[#00B37E]'
-                          : 'bg-[#FEF0D0] text-[#D97706]'
+                          ? 'bg-[#D1F2E5] text-[#00875A]'
+                          : 'bg-[#FEF0D0] text-[#B45309]'
                       }`}>
                         Predicted AQI {ev.aqiPredicted}
                       </span>
                     </div>
 
-                    <h4 className="text-base font-black text-slate-900">{ev.title}</h4>
+                    <h4 className="text-base font-black text-ink-900">{ev.title}</h4>
                     <p className="text-xs text-slate-500">
                       {ev.activityType}
                     </p>
@@ -108,12 +113,12 @@ export default function CalendarView({ onTriggerAlert, alertState }) {
                 </div>
 
                 <div className="text-left sm:text-right">
-                  <span className={`inline-block text-xs font-bold px-3.5 py-1.5 rounded-xl border ${
+                  <span className={`inline-block text-xs font-bold px-4 py-2 rounded-full border shadow-2xs ${
                     ev.severity === 'severe'
                       ? 'bg-[#DC2626] text-white border-[#DC2626]'
                       : ev.severity === 'good'
-                      ? 'bg-[#00B37E] text-white border-[#00B37E]'
-                      : 'bg-slate-100 text-slate-800 border-slate-200'
+                      ? 'bg-[#00875A] text-white border-[#00875A]'
+                      : 'bg-white text-slate-800 border-slate-200'
                   }`}>
                     {ev.status}
                   </span>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, Send, Bot, User, ArrowRight } from 'lucide-react';
+import { Sparkles, Send, Bot, User } from 'lucide-react';
 import { askDrishti } from '../lib/api';
 import { CITIES_DATA } from '../data/airData';
 
@@ -76,7 +76,7 @@ export default function AIAssistantView({
         ...prev,
         {
           sender: 'ai',
-          text: "I'm having trouble connecting to the air intelligence service right now. Please verify that the backend is running and try again.",
+          text: "Sorry, I couldn't reach Drishti's brain just now. Please try again in a moment.",
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ]);
@@ -89,15 +89,15 @@ export default function AIAssistantView({
     <div className="space-y-6 max-w-4xl mx-auto animate-in fade-in duration-200">
       
       {/* Header */}
-      <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-[#00B37E]/10 text-[#00B37E] flex items-center justify-center shadow-xs">
+      <div className="flex items-center justify-between pb-3 border-b border-slate-200/80">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-accent/10 text-accent flex items-center justify-center shadow-2xs">
             <Bot className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="text-xl font-black text-slate-900 font-sans flex items-center gap-2">
+            <h3 className="text-xl font-black text-ink-900 font-sans flex items-center gap-2">
               Drishti AI Assistant
-              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#00B37E]/15 text-[#00B37E]">
+              <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-lime/40 text-ink-900 border border-lime/60">
                 {currentLocation?.city || 'Meerut'} Local Engine Active
               </span>
             </h3>
@@ -117,9 +117,10 @@ export default function AIAssistantView({
           {samplePrompts.map((p, idx) => (
             <button
               key={idx}
+              type="button"
               onClick={() => handleSend(p)}
               disabled={isTyping}
-              className="text-xs px-3.5 py-2 rounded-xl bg-white border border-slate-200 hover:border-[#00B37E] hover:text-[#00B37E] text-slate-700 transition-all font-medium shadow-2xs text-left cursor-pointer active:scale-95 disabled:opacity-50"
+              className="text-xs px-4 py-2 rounded-full bg-white border border-slate-200/80 hover:border-accent hover:text-accent text-slate-700 transition-all font-semibold shadow-2xs text-left cursor-pointer active:scale-95 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               {p}
             </button>
@@ -128,22 +129,22 @@ export default function AIAssistantView({
       </div>
 
       {/* Chat Messages Log */}
-      <div className="p-5 sm:p-6 rounded-[28px] bg-white border border-slate-200 shadow-xs space-y-4 min-h-[360px] max-h-[500px] overflow-y-auto">
+      <div className="p-5 sm:p-7 rounded-[32px] bg-white border border-slate-100 shadow-soft space-y-4 min-h-[380px] max-h-[500px] overflow-y-auto">
         {messages.map((m, idx) => (
           <div
             key={idx}
             className={`flex items-start gap-3 ${m.sender === 'user' ? 'flex-row-reverse' : ''}`}
           >
             <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-bold ${
-              m.sender === 'user' ? 'bg-slate-800' : 'bg-[#00B37E]'
+              m.sender === 'user' ? 'bg-ink-900' : 'bg-accent shadow-xs'
             }`}>
               {m.sender === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
             </div>
 
-            <div className={`max-w-[85%] p-4 rounded-2xl text-xs sm:text-sm leading-relaxed ${
+            <div className={`max-w-[85%] p-4 text-xs sm:text-sm leading-relaxed ${
               m.sender === 'user'
-                ? 'bg-slate-900 text-white rounded-tr-none'
-                : 'bg-slate-50 border border-slate-200/80 text-slate-800 rounded-tl-none font-medium'
+                ? 'bg-ink-900 text-white rounded-[22px] rounded-tr-xs shadow-2xs'
+                : 'bg-[#F4F8F7] border border-slate-200/60 text-ink-900 rounded-[22px] rounded-tl-xs font-medium shadow-2xs'
             }`}>
               <p>{m.text}</p>
               <span className={`text-[10px] mt-1.5 block font-mono ${
@@ -157,7 +158,7 @@ export default function AIAssistantView({
 
         {isTyping && (
           <div className="flex items-center gap-2 text-xs text-slate-400 font-mono italic pl-11">
-            <Sparkles className="w-3.5 h-3.5 text-[#00B37E] animate-spin" />
+            <Sparkles className="w-3.5 h-3.5 text-accent animate-spin" />
             <span>Drishti is thinking...</span>
           </div>
         )}
@@ -169,23 +170,26 @@ export default function AIAssistantView({
           e.preventDefault();
           handleSend();
         }}
-        className="flex items-center gap-2 p-2 rounded-2xl bg-white border border-slate-200 shadow-sm"
+        aria-label="AI atmospheric question form"
+        className="flex items-center gap-2 p-2 pl-5 rounded-full bg-white border border-slate-200/90 shadow-soft focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20 transition-all"
       >
         <input
           type="text"
           value={inputVal}
           onChange={(e) => setInputVal(e.target.value)}
           disabled={isTyping}
+          aria-label="Ask Drishti AI about air quality"
           placeholder="Ask Drishti AI about air quality in Meerut, picnics, mask advice, or travel delays..."
-          className="flex-1 px-4 py-2 text-xs sm:text-sm text-slate-800 placeholder-slate-400 bg-transparent outline-none font-sans"
+          className="flex-1 py-2 text-xs sm:text-sm text-ink-900 placeholder-slate-400 bg-transparent outline-none font-sans"
         />
         <button
           type="submit"
           disabled={!inputVal.trim() || isTyping}
-          className="px-5 py-2.5 rounded-xl bg-[#00B37E] hover:bg-[#009B6D] text-white text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-1.5 cursor-pointer shadow-xs"
+          aria-label="Send question to Drishti AI"
+          title="Send question"
+          className="w-11 h-11 rounded-full bg-accent hover:bg-[#e65a26] text-white flex items-center justify-center transition-all disabled:opacity-50 cursor-pointer shadow-chip focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent flex-shrink-0"
         >
-          <span>Ask</span>
-          <Send className="w-3.5 h-3.5" />
+          <Send className="w-4 h-4" />
         </button>
       </form>
 
