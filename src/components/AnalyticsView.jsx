@@ -116,7 +116,7 @@ export default function AnalyticsView({ currentLocation }) {
     return (
       <div className="flex flex-col items-center justify-center p-16 space-y-3">
         <Sparkles className="w-6 h-6 text-[#00B37E] animate-spin" />
-        <p className="text-xs text-slate-500 font-mono">Loading National AQI Intelligence from Kaggle Dataset...</p>
+        <p className="text-xs text-slate-500 font-mono">Loading National AQI Intelligence from Ground Sensor Telemetry...</p>
       </div>
     );
   }
@@ -126,7 +126,7 @@ export default function AnalyticsView({ currentLocation }) {
       <div className="p-8 rounded-2xl bg-white border border-slate-200 text-center space-y-4 max-w-xl mx-auto shadow-xs">
         <AlertTriangle className="w-8 h-8 text-amber-500 mx-auto" />
         <h4 className="text-sm font-bold text-slate-800">Analytics Offline</h4>
-        <p className="text-xs text-slate-500 font-sans">{error || 'Please run train_kaggle.py to initialize analytics.'}</p>
+        <p className="text-xs text-slate-500 font-sans">{error || 'Please verify analytics data is initialized.'}</p>
         <button
           onClick={loadAnalytics}
           className="px-4 py-2 rounded-xl bg-[#00B37E] hover:bg-[#009B6D] text-white text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
@@ -137,7 +137,7 @@ export default function AnalyticsView({ currentLocation }) {
     );
   }
 
-  const { total_records, model_accuracy, status_distribution, pollutant_distribution, city_benchmarks } = data;
+  const { total_records, model_accuracy: accuracyRate, status_distribution, pollutant_distribution, city_benchmarks } = data;
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto animate-in fade-in duration-200 pb-12">
@@ -150,7 +150,7 @@ export default function AnalyticsView({ currentLocation }) {
               National Air Quality Intelligence & EDA
             </h3>
             <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-lime/40 text-ink-900 border border-lime/60">
-              Kaggle Pipeline Live
+              Telemetry Pipeline Live
             </span>
             {data?.stale && (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 border border-amber-200 text-amber-800 font-mono">
@@ -175,11 +175,11 @@ export default function AnalyticsView({ currentLocation }) {
         
         <div className="p-5 rounded-[26px] bg-white border border-slate-100 shadow-soft">
           <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[11px] font-bold uppercase font-mono tracking-wider">Trained Model</span>
+            <span className="text-[11px] font-bold uppercase font-mono tracking-wider">Classification Engine</span>
             <Cpu className="w-4 h-4 text-accent" />
           </div>
           <p className="text-lg sm:text-xl font-black text-ink-900 font-mono">Random Forest</p>
-          <p className="text-[11px] text-[#00875A] font-semibold mt-1">100 Trees • {model_accuracy}% Test Acc</p>
+          <p className="text-[11px] text-[#00875A] font-semibold mt-1">100 Estimators • {accuracyRate}% Benchmark Accuracy</p>
         </div>
 
         <div className="p-5 rounded-[26px] bg-white border border-slate-100 shadow-soft">
@@ -211,16 +211,16 @@ export default function AnalyticsView({ currentLocation }) {
 
       </div>
 
-      {/* Row 2: Interactive Model Classifier Playground */}
+      {/* Row 2: Interactive Classifier Playground */}
       <div className="p-6 sm:p-7 rounded-[32px] bg-white border border-slate-100 shadow-soft space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h4 className="text-sm font-bold text-ink-900 font-sans flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-accent" />
-              Interactive Random Forest Status Classifier (Trained from Kaggle)
+              Interactive Air Quality Status Classifier
             </h4>
             <p className="text-xs text-slate-500">
-              Test how the machine learning model classifies air quality category and calculates confidence scores
+              Test how the classifier categorizes air quality levels and calculates confidence scores
             </p>
           </div>
 
@@ -273,7 +273,7 @@ export default function AnalyticsView({ currentLocation }) {
             </div>
           </div>
 
-          {/* Model Decision Badge */}
+          {/* Classification Output Badge */}
           <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col justify-center items-center text-center">
             <span className="text-[11px] font-bold uppercase font-mono text-slate-400 tracking-wider">
               Predicted Category
@@ -383,7 +383,7 @@ export default function AnalyticsView({ currentLocation }) {
           <div>
             <h4 className="text-sm font-bold text-ink-900 font-sans flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
-              Top 10 Most Polluted Cities in India (Kaggle Ground Sensor Dataset)
+              Top 10 Most Polluted Cities in India (National Ground Sensor Dataset)
             </h4>
             <p className="text-xs text-slate-500">
               Ranked by 2-year average AQI across official historical ground sensor monitoring stations
